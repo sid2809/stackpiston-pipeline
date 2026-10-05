@@ -1,0 +1,519 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stackpiston.com/schema/review-v1.json",
+  "title": "StackPiston review",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "slug",
+    "seo",
+    "product",
+    "launch",
+    "review",
+    "links",
+    "pricing",
+    "features",
+    "pros",
+    "cons"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "maxLength": 60
+    },
+    "seo": {
+      "type": "object",
+      "required": [
+        "title",
+        "description"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 60
+        },
+        "description": {
+          "type": "string",
+          "minLength": 50,
+          "maxLength": 155
+        }
+      }
+    },
+    "product": {
+      "type": "object",
+      "required": [
+        "name",
+        "vendor",
+        "niche",
+        "summary"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 28
+        },
+        "vendor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "niche": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 24
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 200,
+          "maxLength": 400
+        },
+        "refundDays": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 365
+        },
+        "platform": {
+          "type": "string",
+          "maxLength": 20
+        }
+      }
+    },
+    "launch": {
+      "type": "object",
+      "required": [
+        "cartOpen"
+      ],
+      "properties": {
+        "cartOpen": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "cartClose": {
+          "type": "string",
+          "anyOf": [
+            {
+              "format": "date-time"
+            },
+            {
+              "maxLength": 0
+            }
+          ]
+        },
+        "timeZone": {
+          "type": "string"
+        },
+        "timezoneLabel": {
+          "type": "string",
+          "maxLength": 6
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "required": [
+        "label",
+        "verdict",
+        "finalVerdict",
+        "updatedAt",
+        "author",
+        "scoreBreakdown"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "verdict": {
+          "type": "string",
+          "minLength": 80,
+          "maxLength": 160
+        },
+        "finalVerdict": {
+          "type": "string",
+          "minLength": 60,
+          "maxLength": 120
+        },
+        "methodNote": {
+          "type": "string",
+          "maxLength": 220
+        },
+        "trustBadge": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "testedNote": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "publishedAt": {
+          "type": "string",
+          "format": "date"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date"
+        },
+        "author": {
+          "type": "string",
+          "minLength": 1
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "scoreBreakdown": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "required": [
+              "label",
+              "score"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 18
+              },
+              "score": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 10
+              }
+            }
+          }
+        }
+      }
+    },
+    "media": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "video",
+            "image",
+            ""
+          ]
+        },
+        "videoUrl": {
+          "type": "string"
+        },
+        "imageUrl": {
+          "type": "string"
+        },
+        "imageAlt": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "caption": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "videoTitle": {
+          "type": "string",
+          "maxLength": 40
+        }
+      }
+    },
+    "links": {
+      "type": "object",
+      "required": [
+        "frontEnd"
+      ],
+      "properties": {
+        "frontEnd": {
+          "type": "string",
+          "format": "uri",
+          "minLength": 8
+        },
+        "bonusPage": {
+          "type": "string"
+        }
+      }
+    },
+    "pricing": {
+      "type": "object",
+      "required": [
+        "frontEnd"
+      ],
+      "properties": {
+        "frontEnd": {
+          "type": "object",
+          "required": [
+            "name",
+            "price",
+            "items",
+            "note"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            "price": {
+              "type": "number",
+              "minimum": 0
+            },
+            "priceAfterLaunch": {
+              "type": "number",
+              "minimum": 0
+            },
+            "priceType": {
+              "type": "string",
+              "maxLength": 12
+            },
+            "items": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 4,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 48
+              }
+            },
+            "note": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          }
+        },
+        "otos": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "price",
+              "items",
+              "verdict",
+              "note"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 28
+              },
+              "price": {
+                "type": "number",
+                "minimum": 0
+              },
+              "items": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 4,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 48
+                }
+              },
+              "verdict": {
+                "enum": [
+                  "worth_it",
+                  "optional",
+                  "skip"
+                ]
+              },
+              "note": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "link": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "included": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                  "type": "string",
+                  "maxLength": 70
+                }
+              },
+              "pros": {
+                "type": "array",
+                "maxItems": 4,
+                "items": {
+                  "type": "string",
+                  "maxLength": 70
+                }
+              },
+              "cons": {
+                "type": "array",
+                "maxItems": 4,
+                "items": {
+                  "type": "string",
+                  "maxLength": 70
+                }
+              },
+              "score": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 10
+              },
+              "downsell": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 28
+                  },
+                  "price": {
+                    "type": "number"
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 40
+                  }
+                }
+              },
+              "takeaway": {
+                "type": "string",
+                "maxLength": 400
+              }
+            }
+          }
+        }
+      }
+    },
+    "features": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": [
+          "title",
+          "benefit"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 36
+          },
+          "benefit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 140
+          }
+        }
+      }
+    },
+    "pros": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 6,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 70
+      }
+    },
+    "cons": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 5,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 70
+      }
+    },
+    "goodFor": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 60
+      }
+    },
+    "notFor": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 60
+      }
+    },
+    "bonuses": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "required": [
+          "title",
+          "description",
+          "value"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "maxLength": 14
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 140
+          },
+          "value": {
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "faq": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": [
+          "q",
+          "a"
+        ],
+        "properties": {
+          "q": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "a": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 320
+          }
+        }
+      }
+    }
+  }
+}
