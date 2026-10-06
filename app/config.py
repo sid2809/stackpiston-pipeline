@@ -28,3 +28,23 @@ class WPConfig:
         if not base.startswith("https://"):
             raise ConfigError("WP_BASE_URL must start with https:// (Application Passwords need HTTPS).")
         return cls(base, _need("WP_USER"), _need("WP_APP_PASSWORD"))
+
+
+@dataclass(frozen=True)
+class SheetConfig:
+    sheet_id: str
+    service_account: dict
+
+    @classmethod
+    def from_env(cls) -> "SheetConfig":
+        import base64
+        import binascii
+        import json
+        raw = _need("GOOGLE_SERVICE_ACCOUNT_JSON_B64")
+        try:
+            info = json.loads(base64.b64decode(raw).decode("utf-8"))
+        except (binascii.Error, UnicodeDecodeError, ValueError):
+            raise ConfigError("GOOGLE_SERVICE_ACCOUNT_JSON_B64 is not a valid base64-encoded key file.")
+        if info.get("type") != "service_account":
+            raise ConfigError("GOOGLE_SERVICE_ACCOUNT_JSON_B64 does not contain a service account key.")
+        return cls(_need("SHEET_ID"), info)
