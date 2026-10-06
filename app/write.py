@@ -77,7 +77,8 @@ def _money(v) -> str:
 
 
 def _price_type(t) -> str:
-    return {"monthly": "/month", "yearly": "/year"}.get((t or "").lower(), "one-time")
+    """Unknown stays empty, so the page never claims "one-time" when the vendor didn't say so."""
+    return {"one-time": "one-time", "monthly": "/month", "yearly": "/year"}.get((t or "").lower(), "")
 
 
 def _avg_label(breakdown: list) -> str:
@@ -357,8 +358,28 @@ def _user_message(inp: Inputs) -> str:
             f"TESTING NOTES (optional, from a human tester):\n{inp.testing_notes or '(none)'}")
 
 
+def needs_info(inp: Inputs) -> list[str]:
+    """Problems only you can fix (sheet or vendor data). Checked before spending anything on AI."""
+    f, out = inp.facts, []
+    otos = f.get("otos") or []
+    if inp.oto_links and len(inp.oto_links) != len(otos):
+        out.append(f"Sources list {len(otos)} OTOs but the sheet has {len(inp.oto_links)} OTO links.")
+    bundles = f.get("bundles") or []
+    if bundles and inp.bundle_links:
+        if len(inp.bundle_links) != len(bundles):
+            out.append(f"Sources list {len(bundles)} bundles but the sheet has {len(inp.bundle_links)} Bundle links.")
+        for b in bundles:
+            if b.get("price") is None:
+                out.append(f"Bundle '{b.get('name')}' has no price in the sources.")
+    return out
+
+
 def run(client, inp: Inputs, max_fixes: int = 2, today: str | None = None) -> WriteResult:
     res = WriteResult()
+    blocked = needs_info(inp)
+    if blocked:
+        res.problems = [p + " (needs info)" for p in blocked]
+        return res
     try:
         r = client.complete_json(WRITER, _user_message(inp), max_tokens=12000)
     except LLMError as e:
@@ -375,8 +396,8 @@ def run(client, inp: Inputs, max_fixes: int = 2, today: str | None = None) -> Wr
         if not problems:
             res.review, res.problems = review, []
             return res
-        needs_info = [p for p in problems if "needs info" in p]
-        if needs_info or attempt == max_fixes:
+        stuck = [p for p in problems if "needs info" in p]
+        if stuck or attempt == max_fixes:
             res.review, res.problems = review, problems
             return res
         fix_msg = ("PROBLEMS:\n- " + "\n- ".join(problems) +

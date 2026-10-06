@@ -86,7 +86,12 @@ def main() -> int:
         print("FAIL  no facts to write from.")
         return 1
     bonuses, method_note, src = sheet_extras()
-    f = ex.facts
+    f = dict(ex.facts)
+    unpriced = [b.get("name") for b in f.get("bundles") or [] if b.get("price") is None]
+    if unpriced:
+        print(f"  ✗ (real run would stop here) bundle(s) with no price: {', '.join(map(str, unpriced))}. "
+              "Dry run leaves them out.")
+        f["bundles"] = [b for b in f.get("bundles") or [] if b.get("price") is not None]
     inp = write.Inputs(
         facts=f, fe_link=PLACEHOLDER.format("fe"),
         oto_links=[PLACEHOLDER.format(f"oto{i + 1}") for i in range(len(f.get("otos") or []))],

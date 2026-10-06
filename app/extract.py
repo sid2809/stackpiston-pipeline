@@ -312,8 +312,9 @@ def run(client, main_url: str, sales_url: str | None = None,
         res.notes.append("Refund period not stated; that field will be left out.")
     if facts.get("bundles"):
         res.notes.append(f"Bundle offers found: {', '.join(b.get('name', '?') for b in facts['bundles'])}.")
-    if facts.get("coupons"):
-        res.notes.append(f"Coupons found: {', '.join(c.get('code', '?') for c in facts['coupons'])}.")
+    codes = [c.get("code") for c in facts.get("coupons") or [] if c.get("code")]
+    if codes:
+        res.notes.append(f"Coupons found: {', '.join(codes)}.")
     nov = [b.get("title") for b in facts.get("vendorBonuses") or [] if b.get("value") is None]
     if nov:
         res.notes.append(f"{len(nov)} vendor bonus(es) have no stated value.")

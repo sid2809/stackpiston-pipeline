@@ -28,7 +28,14 @@ def schema_errors(review: dict) -> list[str]:
     out = []
     for e in sorted(_VALIDATOR.iter_errors(review), key=lambda e: list(e.absolute_path)):
         path = ".".join(str(p) for p in e.absolute_path) or "(root)"
-        out.append(f"{path}: {e.message}")
+        v = e.validator
+        if v in ("maxItems", "minItems") and isinstance(e.instance, list):
+            msg = f"has {len(e.instance)} items ({'max' if v == 'maxItems' else 'min'} {e.validator_value})"
+        elif v in ("maxLength", "minLength") and isinstance(e.instance, str):
+            msg = f"is {len(e.instance)} characters ({'max' if v == 'maxLength' else 'min'} {e.validator_value})"
+        else:
+            msg = e.message if len(e.message) <= 200 else e.message[:200] + "…"
+        out.append(f"{path}: {msg}")
     return out
 
 

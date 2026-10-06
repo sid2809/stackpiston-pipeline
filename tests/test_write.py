@@ -136,7 +136,7 @@ def test_bundle_link_count_mismatch_stops_without_fixer():
                     {"position": 2, "name": "DFY", "items": [], "verdict": "optional", "note": "x" * 20}]
     client = FakeClient([c])
     res = run(client, inputs(facts=f, bundle_links=["https://jvz1.com/c/1/b1"]), today="2026-10-06")
-    assert not res.ok and client.calls == 1 and any("needs info" in p for p in res.problems)
+    assert not res.ok and client.calls == 0 and any("needs info" in p for p in res.problems)
 
 
 def test_no_bundle_links_means_bundles_left_out_with_note():
@@ -206,3 +206,38 @@ def test_testing_check_has_no_false_positives():
              "Split testing isn't available", "It doesn't include a test mode", "Did not offer A/B testing"]
     assert all(rx.search(t) for t in flagged)
     assert not any(rx.search(t) for t in clean)
+
+
+def test_needs_info_stops_before_any_ai_call():
+    f = facts_from_sample()
+    f["bundles"] = [{"name": "Bundle", "price": 367}, {"name": "Mega Bundle", "price": None}]
+    client = FakeClient([])
+    res = run(client, inputs(facts=f, bundle_links=["https://jvz1.com/c/1/b1", "https://jvz1.com/c/1/b2"]),
+              today="2026-10-06")
+    assert not res.ok and client.calls == 0 and any("Mega Bundle" in p for p in res.problems)
+
+
+def test_oto_link_count_mismatch_stops_before_ai():
+    client = FakeClient([])
+    inp = inputs()
+    inp.oto_links = inp.oto_links[:4]
+    res = run(client, inp, today="2026-10-06")
+    assert client.calls == 0 and any("OTO links" in p for p in res.problems)
+
+
+def test_schema_messages_are_short():
+    from app.validate import schema_errors
+    d = json.loads(json.dumps(SAMPLE))
+    d["features"] = d["features"] * 3
+    msgs = [m for m in schema_errors(d) if m.startswith("features")]
+    assert msgs == [f"features: has {len(d['features'])} items (max 8)"]
+
+
+def test_unknown_price_type_is_not_claimed_as_one_time():
+    f = facts_from_sample()
+    f["frontEnd"]["priceType"] = None
+    review, _, _ = assemble(copy_from_sample(), inputs(facts=f), "2026-10-06")
+    assert review["pricing"]["frontEnd"]["priceType"] == ""
+    f["frontEnd"]["priceType"] = "one-time"
+    review, _, _ = assemble(copy_from_sample(), inputs(facts=f), "2026-10-06")
+    assert review["pricing"]["frontEnd"]["priceType"] == "one-time"
