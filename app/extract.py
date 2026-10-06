@@ -17,6 +17,7 @@ from .llm import LLMError
 from .timeparse import to_utc
 
 PROMPT = (Path(__file__).resolve().parent.parent / "prompts" / "extraction.md").read_text(encoding="utf-8")
+NOTES_PROMPT = (Path(__file__).resolve().parent.parent / "prompts" / "notes.md").read_text(encoding="utf-8")
 
 
 @dataclass
@@ -78,8 +79,9 @@ def clean_facts(d) -> dict:
                        "includes": _strs(b.get("includes"))} for b in _objs(d.get("bundles"))]
     out["coupons"] = [{"code": str(c.get("code") or ""), "discount": str(c.get("discount") or ""),
                        "appliesTo": c.get("appliesTo")} for c in _objs(d.get("coupons"))]
-    out["vendorBonuses"] = [{"title": str(b.get("title") or ""), "description": b.get("description"),
-                             "value": _num(b.get("value"))} for b in _objs(d.get("vendorBonuses")) if b.get("title")]
+    for key in ("vendorBonuses", "affiliateBonuses"):
+        out[key] = [{"title": str(b.get("title") or ""), "description": b.get("description"),
+                     "value": _num(b.get("value"))} for b in _objs(d.get(key)) if b.get("title")]
     out["features"] = [{"title": str(f.get("title") or ""), "detail": str(f.get("detail") or "")}
                        for f in _objs(d.get("features")) if f.get("title")]
     for k in ("goodFor", "limitations", "internalConflicts", "unknowns"):
@@ -93,6 +95,18 @@ def extract_source(client, src: Source, role: str) -> tuple[dict, int, int]:
             f"--- SOURCE TEXT START ---\n{src.text}\n--- SOURCE TEXT END ---")
     r = client.complete_json(PROMPT, user, max_tokens=8000, temperature=0)
     return clean_facts(r.data), r.input_tokens, r.output_tokens
+
+
+def apply_notes(client, facts: dict, notes: str) -> tuple[dict, int, int]:
+    """Owner's 'Notes for AI' win over the vendor pages. Launch times are never taken from notes."""
+    user = (f"OWNER NOTES:\n{notes.strip()}\n\nFACTS:\n{json.dumps(facts, ensure_ascii=False, indent=1)}")
+    r = client.complete_json(NOTES_PROMPT, user, max_tokens=8000)
+    # Keys the AI left out keep their original values, so a partial reply can't wipe facts.
+    reply = r.data if isinstance(r.data, dict) else {}
+    out = clean_facts({**facts, **{k: v for k, v in reply.items() if k in facts}})
+    out["launch"] = copy.deepcopy(facts.get("launch") or out.get("launch"))
+    out["internalConflicts"] = []
+    return out, r.input_tokens, r.output_tokens
 
 
 # ------------------------------------------------------------------ comparing
@@ -217,18 +231,20 @@ def merge(main: dict, others: list[dict]) -> dict:
         for k in ("bundles", "features", "goodFor", "limitations"):
             if not m.get(k) and o.get(k):
                 m[k] = copy.deepcopy(o[k])
-        have = {_norm(b.get("title")) for b in m.get("vendorBonuses") or []}
-        for b in o.get("vendorBonuses") or []:
-            if _norm(b.get("title")) not in have:
-                m.setdefault("vendorBonuses", []).append(b)
-                have.add(_norm(b.get("title")))
+        for key in ("vendorBonuses", "affiliateBonuses"):
+            have = {_norm(b.get("title")) for b in m.get(key) or []}
+            for b in o.get(key) or []:
+                if _norm(b.get("title")) not in have:
+                    m.setdefault(key, []).append(b)
+                    have.add(_norm(b.get("title")))
     return m
 
 
 # ------------------------------------------------------------------ orchestration
 
 def run(client, main_url: str, sales_url: str | None = None,
-        cart_open_override_utc: str | None = None, cart_close_override_utc: str | None = None) -> ExtractResult:
+        cart_open_override_utc: str | None = None, cart_close_override_utc: str | None = None,
+        owner_notes: str | None = None) -> ExtractResult:
     res = ExtractResult(facts={})
     try:
         main_src = fetch(main_url)
@@ -283,6 +299,22 @@ def run(client, main_url: str, sales_url: str | None = None,
 
     facts = merge(main_facts, other_facts)
 
+    owner_notes = (owner_notes or "").strip()
+    if owner_notes:
+        try:
+            facts, ti, to = apply_notes(client, facts, owner_notes)
+            res.input_tokens += ti
+            res.output_tokens += to
+        except LLMError as e:
+            res.blocking.append(f"Notes for AI could not be applied: {e}")
+            return res
+        # The owner has seen the sources and corrected them: source disagreements no longer block.
+        # Missing prices, link counts and time checks below still do.
+        demoted = [b for b in res.blocking if not b.startswith(("Cart open", "Cart close"))]
+        res.blocking = [b for b in res.blocking if b.startswith(("Cart open", "Cart close"))]
+        res.notes += [f"Sources disagreed, your notes decide: {d}" for d in demoted]
+        res.notes.append("Notes for AI applied.")
+
     # times -> UTC (sheet overrides win and clear time problems)
     launch = facts.get("launch") or {}
     for key, override, required in (("cartOpen", cart_open_override_utc, True),
@@ -315,6 +347,8 @@ def run(client, main_url: str, sales_url: str | None = None,
     codes = [c.get("code") for c in facts.get("coupons") or [] if c.get("code")]
     if codes:
         res.notes.append(f"Coupons found: {', '.join(codes)}.")
+    if facts.get("affiliateBonuses"):
+        res.notes.append(f"{len(facts['affiliateBonuses'])} affiliate pack bonus(es) found; they will be listed as your bonuses.")
     nov = [b.get("title") for b in facts.get("vendorBonuses") or [] if b.get("value") is None]
     if nov:
         res.notes.append(f"{len(nov)} vendor bonus(es) have no stated value.")
@@ -337,7 +371,8 @@ def summary(res: ExtractResult) -> str:
                      + (f"  (downsell ${ds.get('price')})" if ds.get("price") is not None else ""))
     for b in f.get("bundles") or []:
         lines.append(f"  Bundle: {b.get('name')} ${b.get('price')}")
-    lines.append(f"Vendor bonuses: {len(f.get('vendorBonuses') or [])}  |  Features: {len(f.get('features') or [])}"
+    lines.append(f"Vendor bonuses: {len(f.get('vendorBonuses') or [])}  |  Affiliate pack bonuses: "
+                 f"{len(f.get('affiliateBonuses') or [])}  |  Features: {len(f.get('features') or [])}"
                  f"  |  Images found: {len(res.images)}  |  Videos found: {len(res.videos)}")
     return "\n".join(lines)
 

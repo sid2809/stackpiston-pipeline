@@ -250,3 +250,50 @@ def test_claiming_vendor_has_no_bonuses_is_flagged():
     bad = copy.deepcopy(good)
     bad["faq"][3]["a"] = "Buy through our link. The vendor lists no buyer bonuses of its own."
     assert any("claims there are no bonuses" in p for p in _check(bad, inputs()))
+
+
+def _pack_facts(n=2, values=(47, None)):
+    f = facts_from_sample()
+    f["affiliateBonuses"] = [{"title": f"Pack bonus {i + 1}", "description": "d", "value": values[i % len(values)]}
+                             for i in range(n)]
+    return f
+
+
+def test_affiliate_pack_bonuses_listed_as_our_bonuses_after_sheet_bonus():
+    c = copy_from_sample()
+    c["packBonuses"] = [{"title": "Viral Video WP Theme", "description": "WordPress theme for video blogs."},
+                        {"title": "Buyer Triggers", "description": "Ten triggers that turn leads into customers."}]
+    res = run(FakeClient([c]), inputs(facts=_pack_facts()), today="2026-10-06")
+    assert res.ok, res.problems
+    b = res.review["bonuses"]
+    assert [x["title"] for x in b] == ["15-Min 1-on-1 Founder Call", "Viral Video WP Theme", "Buyer Triggers"]
+    assert b[1]["value"] == 47 and b[2]["value"] == 0 and b[1]["type"] == "Bonus"
+
+
+def test_income_claim_in_pack_bonus_is_flagged_and_fixed():
+    bad = copy_from_sample()
+    bad["packBonuses"] = [{"title": "$10,060 & 6,424 Leads Case Study", "description": "A case study."},
+                          {"title": "Buyer Triggers", "description": "Ten triggers."}]
+    good = copy.deepcopy(bad)
+    good["packBonuses"][0]["title"] = "Lead Generation Case Study"
+    client = FakeClient([bad, good])
+    res = run(client, inputs(facts=_pack_facts()), today="2026-10-06")
+    assert res.ok and client.calls == 2 and res.review["bonuses"][1]["title"] == "Lead Generation Case Study"
+
+
+def test_pack_bonuses_capped_at_twelve_total():
+    f = _pack_facts(n=15, values=(10,))
+    c = copy_from_sample()
+    c["packBonuses"] = [{"title": f"B{i}", "description": "d"} for i in range(11)]
+    res = run(FakeClient([c]), inputs(facts=f), today="2026-10-06")
+    assert res.ok and len(res.review["bonuses"]) == 12
+    assert any("only 11 fit" in n for n in res.notes)
+
+
+def test_extraction_keeps_affiliate_and_vendor_bonuses_apart():
+    from app.extract import clean_facts, merge
+    a = clean_facts({"vendorBonuses": [{"title": "V1"}], "affiliateBonuses": [{"title": "A1", "value": "$27"}]})
+    b = clean_facts({"affiliateBonuses": [{"title": "A1"}, {"title": "A2"}]})
+    m = merge(a, [b])
+    assert [x["title"] for x in m["vendorBonuses"]] == ["V1"]
+    assert [x["title"] for x in m["affiliateBonuses"]] == ["A1", "A2"] and m["affiliateBonuses"][0]["value"] == 27.0

@@ -10,7 +10,8 @@ Rules:
 - List OTOs in funnel order (OTO 1 first). A downsell belongs to the OTO it follows.
 - A "bundle" is a separate offer that packages the front end and upsells together (often with its own funnel). Put bundles and their upsells in "bundles", not in "otos".
 - Ignore affiliate contest prizes, commission percentages, JV partner details, swipe emails and earnings claims.
-- Vendor bonuses are bonuses the vendor gives every buyer. Record a value only if the source states one.
+- Vendor bonuses are bonuses the vendor itself gives every buyer of the product. Record a value only if the source states one.
+- Affiliate bonuses are a bonus pack the vendor gives to affiliates so they can offer it to their own buyers (often a separate doc, with wording like "bonuses for your subscribers", "use these as your bonuses", "affiliate bonus pack"). Put these in "affiliateBonuses", not "vendorBonuses". If a source is a bonus doc and it isn't clear which kind it is, use "affiliateBonuses" and add a note to "unknowns".
 
 Return ONE JSON object, no prose, no code fences, with exactly these keys:
 
@@ -33,6 +34,7 @@ Return ONE JSON object, no prose, no code fences, with exactly these keys:
   "bundles": [{"name": string, "price": number|null, "includes": [string]}],
   "coupons": [{"code": string, "discount": string, "appliesTo": string|null}],
   "vendorBonuses": [{"title": string, "description": string|null, "value": number|null}],
+  "affiliateBonuses": [{"title": string, "description": string|null, "value": number|null}],
   "features": [{"title": string, "detail": string}],
   "goodFor": [string],
   "limitations": [string],

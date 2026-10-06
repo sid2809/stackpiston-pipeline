@@ -5,7 +5,8 @@ Output rules
 - Use exactly the keys in the template. Do not add or rename keys.
 - Respect every length limit. Count characters. If text would run over, shorten it without changing its meaning.
 - Use only facts from FACTS. Never invent features, numbers, results, prices or refund terms. If something isn't in FACTS, leave it out.
-- "otos" must have exactly the same count and order as FACTS.otos (position 1 first). Same for "bundles" (FACTS.bundles) and "vendorBonuses" (FACTS.vendorBonuses).
+- "otos" must have exactly the same count and order as FACTS.otos (position 1 first). Same for "bundles" (FACTS.bundles), "vendorBonuses" (FACTS.vendorBonuses) and "packBonuses" (FACTS.affiliateBonuses, up to the count in COUNTS).
+- packBonuses are bonuses StackPiston gives as its own (from the vendor's affiliate pack). Rewrite each title and description clearly, with no income or results claims (no dollar earnings, view counts or lead counts).
 - Never write URLs.
 - Never claim something is absent just because FACTS doesn't mention it (e.g. never write "the vendor has no bonuses" or "there is no refund"). Say it isn't stated, or leave it out.
 - Testing: describe specific test results (timings, counts, outcomes) only if TESTING NOTES contain them. Otherwise describe what the product does, based on FACTS, without claiming measured results.
@@ -51,7 +52,8 @@ Template and limits
   "goodFor": ["2–4, each ≤60"],
   "notFor": ["2–4, each ≤60"],
   "vendorBonuses": [{"title": "≤40 chars", "description": "≤140 chars, no income claims"}],
+  "packBonuses": [{"title": "≤40 chars", "description": "≤140 chars, no income or results claims"}],
   "faq": [{"q": "≤80 chars", "a": "≤320 chars"}]
 }
 
-Before you answer, check: valid JSON; every limit respected; otos/bundles/vendorBonuses counts and order match FACTS; no URLs, prices you invented, or income claims.
+Before you answer, check: valid JSON; every limit respected; otos/bundles/vendorBonuses/packBonuses counts and order match FACTS; no URLs, prices you invented, or income claims.

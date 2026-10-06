@@ -76,3 +76,56 @@ def test_supporting_page_ai_failure_is_only_a_note(monkeypatch):
     res = ex.run(Flaky(), main.url, cart_open_override_utc="2026-10-05T15:00:00Z")
     assert res.facts["productName"] == "X"
     assert any("AI could not read it" in n for n in res.notes)
+
+
+def test_notes_for_ai_override_sources_and_unblock_conflicts(monkeypatch):
+    main = Source("https://v.com/jv/", "web", "x" * 900, [("https://v.com/jvdoc/", "JV Doc")])
+    doc = Source("https://v.com/jvdoc/", "web", "y" * 900)
+    monkeypatch.setattr(ex, "fetch", _fake_fetch({main.url: main, doc.url: doc}))
+    page = dict(JV_PAGE, productName="Comic Videos AI",
+                otos=JV_PAGE["otos"] + [{"position": 5, "name": "DFY", "price": 127}],
+                bundles=[{"name": "Bundle", "price": 367}, {"name": "Mega Bundle", "price": None}])
+    corrected = dict(page, otos=JV_PAGE["otos"],
+                     bundles=[{"name": "Bundle", "price": 367}, {"name": "Mega Bundle", "price": 147},
+                              {"name": "DFY", "price": 127}],
+                     launch={"cartOpen": {"local": "2030-01-01 00:00", "zone": "UTC", "raw": "notes tried this"}})
+    client = FakeClient([page, JV_DOC, corrected])
+    res = ex.run(client, main.url, cart_open_override_utc="2026-10-05T15:00:00Z",
+                 owner_notes="OTOs are only Pro, Automation, Agency, Growth. Mega Bundle $147. DFY is a bundle.")
+    assert res.ok, res.blocking  # source conflicts no longer block
+    assert [o["name"] for o in res.facts["otos"]] == ["Unlimited", "Pro", "Agency", "Growth"]
+    assert [b["price"] for b in res.facts["bundles"]] == [367, 147, 127]
+    assert res.facts["launch"]["cartOpen"]["raw"] == "10 AM EST"  # notes can't change launch times
+    assert any("your notes decide" in n for n in res.notes) and "Notes for AI applied." in res.notes
+
+
+def test_notes_do_not_unblock_time_or_missing_price(monkeypatch):
+    main = Source("https://v.com/jv/", "web", "x" * 900)
+    monkeypatch.setattr(ex, "fetch", _fake_fetch({main.url: main}))
+    page = dict(JV_PAGE, productName="X")
+    still_missing = dict(page, otos=[{"position": 1, "name": "Pro", "price": None}])
+    res = ex.run(FakeClient([page, still_missing]), main.url, owner_notes="Pro is the only OTO.")
+    joined = " | ".join(res.blocking)
+    assert "summer time" in joined and "has no price" in joined
+
+
+def test_no_notes_means_no_extra_ai_call(monkeypatch):
+    main = Source("https://v.com/jv/", "web", "x" * 900)
+    monkeypatch.setattr(ex, "fetch", _fake_fetch({main.url: main}))
+    client = FakeClient([dict(JV_PAGE, productName="X")])
+    ex.run(client, main.url, owner_notes="   ")
+    assert client.replies == []
+
+
+def test_partial_notes_reply_keeps_untouched_facts(monkeypatch):
+    main = Source("https://v.com/jv/", "web", "x" * 900)
+    monkeypatch.setattr(ex, "fetch", _fake_fetch({main.url: main}))
+    page = dict(JV_PAGE, productName="X", vendor="Yogesh",
+                affiliateBonuses=[{"title": "Pack 1"}], coupons=[{"code": "CVAI6OFF", "discount": "$6 off"}])
+    partial = {"bundles": [{"name": "Mega Bundle", "price": 147}], "made_up_key": 1}
+    res = ex.run(FakeClient([page, partial]), main.url, cart_open_override_utc="2026-10-05T15:00:00Z",
+                 owner_notes="Mega Bundle is $147.")
+    f = res.facts
+    assert f["vendor"] == "Yogesh" and [o["name"] for o in f["otos"]] == [o["name"] for o in JV_PAGE["otos"]]
+    assert f["affiliateBonuses"][0]["title"] == "Pack 1" and f["coupons"][0]["code"] == "CVAI6OFF"
+    assert f["bundles"] == [{"name": "Mega Bundle", "price": 147.0, "includes": []}] and "made_up_key" not in f

@@ -123,6 +123,12 @@ def assemble(copy_: dict, inp: Inputs, today: str | None = None) -> tuple[dict, 
     otos_f, otos_c = f.get("otos") or [], [o for o in (c.get("otos") or []) if isinstance(o, dict)]
     if len(otos_c) != len(otos_f):
         problems.append(f"Text has {len(otos_c)} OTOs but FACTS has {len(otos_f)}; write exactly {len(otos_f)} in order.")
+    pack_f = (f.get("affiliateBonuses") or [])[:max(0, 12 - len(inp.own_bonuses))]
+    pack_c = [x for x in (c.get("packBonuses") or []) if isinstance(x, dict)]
+    if pack_f and len(pack_c) != len(pack_f):
+        problems.append(f"Text has {len(pack_c)} pack bonuses but FACTS has {len(pack_f)}; write exactly {len(pack_f)}.")
+    if len(f.get("affiliateBonuses") or []) > len(pack_f):
+        notes.append(f"Affiliate pack has {len(f['affiliateBonuses'])} bonuses; only {len(pack_f)} fit (12 bonuses max).")
     vb_f = (f.get("vendorBonuses") or [])[:12]
     vb_c = [x for x in (c.get("vendorBonuses") or []) if isinstance(x, dict)]
     if vb_f and len(vb_c) != len(vb_f):
@@ -157,7 +163,11 @@ def assemble(copy_: dict, inp: Inputs, today: str | None = None) -> tuple[dict, 
             "note": (c.get("frontEnd") or {}).get("note", "")}},
         "features": c.get("features") or [], "pros": c.get("pros") or [], "cons": c.get("cons") or [],
         "goodFor": c.get("goodFor") or [], "notFor": c.get("notFor") or [],
-        "bonuses": inp.own_bonuses,
+        "bonuses": list(inp.own_bonuses) + [
+            {"type": "Bonus", "title": (pack_c[i] if i < len(pack_c) else {}).get("title") or str(pf.get("title") or "")[:40],
+             "description": (pack_c[i] if i < len(pack_c) else {}).get("description") or "",
+             "value": float(pf["value"]) if pf.get("value") is not None else 0.0}
+            for i, pf in enumerate(pack_f)],
         "faq": c.get("faq") or [],
     }
     if f.get("refundDays") is not None:
@@ -280,9 +290,10 @@ def allowed_amounts(facts: dict, own_bonuses: list[dict]) -> set[str]:
     for p in base:
         for d in discounts:
             add(p - d)                                       # price after coupon
-    for x in (facts.get("vendorBonuses") or []) + (own_bonuses or []):
+    pack = facts.get("affiliateBonuses") or []
+    for x in (facts.get("vendorBonuses") or []) + pack + (own_bonuses or []):
         add(x.get("value"))
-    add(sum(float(b.get("value") or 0) for b in own_bonuses or []))
+    add(sum(float(b.get("value") or 0) for b in (own_bonuses or []) + pack))
     return nums
 
 
@@ -309,6 +320,9 @@ def price_mentions(review: dict, allowed: set[str]) -> list[str]:
     walk({"note": (review.get("pricing") or {}).get("frontEnd", {}).get("note")}, "pricing.frontEnd")
     for i, v in enumerate(review.get("vendorBonuses") or []):
         walk({k: v.get(k) for k in ("title", "description")}, f"vendorBonuses #{i + 1}")
+    n_own = review.get("_own_bonus_count", 0)
+    for i, b in enumerate((review.get("bonuses") or [])[n_own:], n_own + 1):
+        walk({k: b.get(k) for k in ("title", "description")}, f"bonuses #{i}")
     return out
 
 
@@ -330,7 +344,8 @@ def _check(review: dict, inp: Inputs) -> list[str]:
     res = validate(review, fe_link=inp.fe_link, oto_links=inp.oto_links, authors=inp.authors,
                    extra_allowed=extra, bundle_links=inp.bundle_links)
     probs = res["schema_errors"] + res["theme_warnings"] + res["link_errors"]
-    probs += price_mentions(review, allowed_amounts(inp.facts, inp.own_bonuses))
+    probs += price_mentions(dict(review, _own_bonus_count=len(inp.own_bonuses)),
+                            allowed_amounts(inp.facts, inp.own_bonuses))
     tested_re = re.compile(r"\b(not|never|\w+n't)\W+(\w+\W+){0,3}?tested\b|\bin our tests?\b|\bwe(\s+have|'ve)?\s+tested\b"
                            r"|\b(hands-on|personally)\s+tested\b", re.I)
     for path, text in _strings(review):
@@ -351,7 +366,8 @@ def _check(review: dict, inp: Inputs) -> list[str]:
 
 def _user_message(inp: Inputs) -> str:
     f = {k: v for k, v in inp.facts.items() if k not in ("internalConflicts", "launch")}
-    counts = (f"COUNTS: otos={len(inp.facts.get('otos') or [])}, "
+    n_pack = len((inp.facts.get("affiliateBonuses") or [])[:max(0, 12 - len(inp.own_bonuses))])
+    counts = (f"COUNTS: otos={len(inp.facts.get('otos') or [])}, packBonuses={n_pack}, "
               f"bundles={len(inp.facts.get('bundles') or []) if inp.bundle_links else 0}, "
               f"vendorBonuses={len((inp.facts.get('vendorBonuses') or [])[:12])}")
     if not inp.bundle_links:

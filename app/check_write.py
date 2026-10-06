@@ -6,6 +6,7 @@ WordPress or the sheet. Continues past extraction problems so the writing can be
 but prints them: a real run would stop there.
 
 Optional: CART_OPEN_UTC=2026-10-05T15:00:00Z (pretend Cart open is filled in the sheet).
+Optional: NOTES_FOR_AI="..." (pretend the Notes for AI column is filled in).
 Optional: add --draft to also create a "[DRY RUN]" draft on WP_BASE_URL (use staging) so you can
 see the real page. Re-running replaces nothing: delete old dry-run drafts in wp-admin.
 """
@@ -70,7 +71,8 @@ def main() -> int:
     try:
         client = get_client()
         ex = extract.run(client, args[0], args[1] if len(args) > 1 else None,
-                         cart_open_override_utc=os.environ.get("CART_OPEN_UTC") or None)
+                         cart_open_override_utc=os.environ.get("CART_OPEN_UTC") or None,
+                         owner_notes=os.environ.get("NOTES_FOR_AI") or None)
     except LLMError as e:
         print(f"FAIL  {e}")
         return 1
