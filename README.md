@@ -15,5 +15,5 @@ Full plan: see the "StackPiston Pipeline: Build Plan & Phases" doc.
 Email notifications are deferred: while SMTP settings are empty, results appear only in the sheet.
 
 ## Run the tests
-    pip install -r requirements.txt
+    pip install -r requirements-dev.txt
     python -m pytest -q

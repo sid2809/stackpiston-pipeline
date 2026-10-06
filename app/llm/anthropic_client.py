@@ -27,9 +27,9 @@ class AnthropicClient:
 
     def _complete(self, system: str, user: str, max_tokens: int, temperature: float | None) -> LLMResult:
         try:
-            kw = {"temperature": temperature} if temperature is not None else {}
+            # The current Anthropic SDK has no temperature setting, so it is not sent.
             r = self.c.messages.create(model=self.model, max_tokens=max_tokens, system=system,
-                                       messages=[{"role": "user", "content": user}], **kw)
+                                       messages=[{"role": "user", "content": user}])
         except anthropic.AuthenticationError:
             raise LLMError("Anthropic rejected the API key. Re-copy ANTHROPIC_API_KEY into Railway.")
         except anthropic.PermissionDeniedError as e:
