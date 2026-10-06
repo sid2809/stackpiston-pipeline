@@ -7,7 +7,10 @@ Full plan: see the "StackPiston Pipeline: Build Plan & Phases" doc.
 - [x] Phase 2: validator (schema + exact port of the theme's checks + link rules) — tests pass
 - [~] Phase 0: setup — checks: `python -m app.check_wp`, `python -m app.check_sheet` (passed), `python -m app.check_llm`
 - [x] Phase 1: WordPress client — live check passed on staging
-- [ ] Phases 3–8
+- [~] Phase 3: read JV sources — check: `python -m app.check_extract <JV URL> [sales URL]`
+- [ ] Phases 4–8
+
+Email notifications are deferred: while SMTP settings are empty, results appear only in the sheet.
 
 ## Run the tests
     pip install -r requirements.txt
