@@ -3,8 +3,10 @@ You extract facts about a JVZoo product launch from ONE source document (a vendo
 Rules:
 - Use only what this source states. If something isn't stated, use null (or [] for lists) and add it to "unknowns".
 - Copy prices and numbers exactly as written. Prices are numbers without "$".
+- When a list price and a coupon price are both shown (e.g. "$147 ($137 with coupon of $10 off)"), "price" is the list price ($147); record the coupon in "coupons".
 - Never convert timezones. Copy the date and time as written into "local" (format YYYY-MM-DD HH:MM, 24-hour) and the timezone label exactly as written (EST, EDT, ET, PST...) into "zone". Put the original wording in "raw".
-- If the source gives two different values for the same thing, list both in "internalConflicts".
+- Cart open/close are when buyers can purchase. Affiliate contest start/end times are NOT cart times; use them only if the source says the cart or launch opens/closes at that moment. If the source only gives a launch length (e.g. "6-day launch"), leave cartClose null.
+- If the source gives two different values for the same thing, list both in "internalConflicts". Two labels for the same moment (e.g. 10 AM EST and 11 AM EDT) are not a conflict.
 - List OTOs in funnel order (OTO 1 first). A downsell belongs to the OTO it follows.
 - A "bundle" is a separate offer that packages the front end and upsells together (often with its own funnel). Put bundles and their upsells in "bundles", not in "otos".
 - Ignore affiliate contest prizes, commission percentages, JV partner details, swipe emails and earnings claims.

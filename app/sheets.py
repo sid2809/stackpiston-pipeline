@@ -16,6 +16,7 @@ TABS = {
     "Method notes": ["Note"],
     "Logs": ["Timestamp (IST)", "Row", "Slug", "Step", "Result", "Details"],
 }
+OPTIONAL = {"Launches": ["Bundle links"]}  # used when present; missing is only a note
 MAX_CELL = 49_000  # Google Sheets cell limit is 50,000 characters
 
 

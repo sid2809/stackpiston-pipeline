@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import gspread
 
 from .config import ConfigError, SheetConfig
-from .sheets import append_log, missing_headers, open_sheet
+from .sheets import OPTIONAL, append_log, missing_headers, norm, open_sheet
 
 
 def main() -> int:
@@ -42,6 +42,11 @@ def main() -> int:
     if problems:
         return 1
     print("OK  all 4 tabs and required columns found")
+    for tab, cols in OPTIONAL.items():
+        have = {norm(h) for h in sh.worksheet(tab).row_values(1)}
+        for c in cols:
+            if norm(c) not in have:
+                print(f"NOTE  optional column '{c}' not in tab '{tab}' (needed only for launches with bundles)")
     now = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M")
     try:
         append_log(sh, [now, "", "", "connection test", "OK", "Pipeline can write to this sheet."])

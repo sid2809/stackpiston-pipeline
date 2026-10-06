@@ -89,3 +89,11 @@ def test_merge_fills_gaps_only():
 def test_am_pm_times_are_read():
     assert to_utc("2026-10-05 11:00 AM", "EDT")[0] == "2026-10-05T15:00:00Z"
     assert to_utc("2026-10-05 2:30 pm", "EDT")[0] == "2026-10-05T18:30:00Z"
+
+
+def test_bundle_names_match_exactly_not_by_substring():
+    from app.extract import bundle_conflicts
+    main = {"productName": "ComicVideos AI", "bundles": [{"name": "Bundle", "price": 367}, {"name": "DFY", "price": 127}]}
+    other = {"bundles": [{"name": "DFY Bundle", "price": 127}, {"name": "ComicVideos AI DFY", "price": 167}]}
+    c = bundle_conflicts(main, other, "p2")
+    assert c == ["Bundle 'DFY' price: main $127, p2 $167."]

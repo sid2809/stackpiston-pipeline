@@ -151,10 +151,24 @@ def compare(main: dict, other: dict, label: str) -> list[str]:
             rb = ((other.get("launch") or {}).get(key) or {}).get("raw")
             out.append(f"{name}: main source '{ra}' ({ta}), {label} '{rb}' ({tb}).")
 
+    return out
+
+
+def _bundle_key(name, product) -> str:
+    n = _norm(name)
+    p = _norm(product)
+    return n.replace(p, "") if p and len(n) > len(p) else n
+
+
+def bundle_conflicts(main: dict, other: dict, label: str) -> list[str]:
+    """Bundles are matched by exact name (minus the product name) — 'Bundle' must not match 'DFY Bundle'."""
+    out = []
+    prod = main.get("productName")
     for bm in main.get("bundles") or []:
         for bo in other.get("bundles") or []:
-            if _same_name(bm.get("name"), bo.get("name")) and _num(bm.get("price")) is not None \
-                    and _num(bo.get("price")) is not None and _num(bm["price"]) != _num(bo["price"]):
+            if _bundle_key(bm.get("name"), prod) == _bundle_key(bo.get("name"), prod) \
+                    and _num(bm.get("price")) is not None and _num(bo.get("price")) is not None \
+                    and _num(bm["price"]) != _num(bo["price"]):
                 out.append(f"Bundle '{bm.get('name')}' price: main ${_num(bm['price']):g}, "
                            f"{label} ${_num(bo['price']):g}.")
     return out
@@ -251,6 +265,7 @@ def run(client, main_url: str, sales_url: str | None = None,
         label = f"linked page {i} ({s.url})"
         res.blocking += compare(main_facts, f, label)
         res.notes += coupon_conflicts(main_facts, f, label)
+        res.notes += bundle_conflicts(main_facts, f, label)
         other_facts.append(f)
 
     for c in main_facts.get("internalConflicts") or []:

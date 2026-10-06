@@ -287,6 +287,25 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 120
+            },
+            "coupon": {
+              "type": "object",
+              "required": [
+                "code",
+                "discount"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 24
+                },
+                "discount": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 40
+                }
+              }
             }
           }
         },
@@ -392,6 +411,75 @@
               "takeaway": {
                 "type": "string",
                 "maxLength": 400
+              }
+            }
+          }
+        },
+        "bundles": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "price",
+              "verdict",
+              "note",
+              "link"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              },
+              "price": {
+                "type": "number",
+                "minimum": 0
+              },
+              "items": {
+                "type": "array",
+                "maxItems": 6,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 48
+                }
+              },
+              "verdict": {
+                "enum": [
+                  "worth_it",
+                  "optional",
+                  "skip"
+                ]
+              },
+              "note": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "link": {
+                "type": "string",
+                "format": "uri"
+              },
+              "coupon": {
+                "type": "object",
+                "required": [
+                  "code",
+                  "discount"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 24
+                  },
+                  "discount": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                  }
+                }
               }
             }
           }
@@ -511,6 +599,31 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 320
+          }
+        }
+      }
+    },
+    "vendorBonuses": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 140
+          },
+          "value": {
+            "type": "number",
+            "minimum": 0
           }
         }
       }

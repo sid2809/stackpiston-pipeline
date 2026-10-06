@@ -220,6 +220,11 @@ def theme_warnings(d, authors: set[str] | None = None) -> list[str]:
     _v_num(w, "pricing.frontEnd.priceAfterLaunch", _get(d, "pricing.frontEnd.priceAfterLaunch"), 0)
     _v_strlist(w, "pricing.frontEnd.items", _get(d, "pricing.frontEnd.items"), 1, 4, 48, True)
     _v_str(w, "pricing.frontEnd.note", _get(d, "pricing.frontEnd.note"), 0, 120, True)
+    fc = _get(d, "pricing.frontEnd.coupon")
+    if fc:
+        fc = fc if isinstance(fc, dict) else {}
+        _v_str(w, "pricing.frontEnd.coupon code", fc.get("code"), 0, 24, True)
+        _v_str(w, "pricing.frontEnd.coupon discount", fc.get("discount"), 0, 40, True)
 
     otos = _get(d, "pricing.otos")
     if _v_list(w, "pricing.otos", otos, 0, 10):
@@ -249,6 +254,26 @@ def theme_warnings(d, authors: set[str] | None = None) -> list[str]:
                 _v_num(w, f"{L} downsell price", ds.get("price"), 0, None, True)
                 _v_str(w, f"{L} downsell note", ds.get("note"), 0, 40)
 
+    bu = _get(d, "pricing.bundles")
+    if _v_list(w, "pricing.bundles", bu, 0, 4):
+        for i, x in enumerate(bu):
+            x = x if isinstance(x, dict) else {}
+            L = f"Bundle {i + 1}"
+            _v_str(w, f"{L} name", x.get("name"), 0, 32, True)
+            _v_num(w, f"{L} price", x.get("price"), 0, None, True)
+            _v_strlist(w, f"{L} items", x.get("items"), 0, 6, 48)
+            if x.get("verdict", "") not in ("worth_it", "optional", "skip"):
+                w.append(f"{L} verdict should be worth_it, optional or skip.")
+            _v_str(w, f"{L} note", x.get("note"), 0, 120, True)
+            if not x.get("link"):
+                w.append(f"{L} has no affiliate link — its button will point to the front end.")
+            elif not _valid_url(x.get("link")):
+                w.append(f"{L} link is not a valid URL.")
+            if x.get("coupon"):
+                c = x["coupon"] if isinstance(x["coupon"], dict) else {}
+                _v_str(w, f"{L} coupon code", c.get("code"), 0, 24, True)
+                _v_str(w, f"{L} coupon discount", c.get("discount"), 0, 40, True)
+
     f = _get(d, "features")
     if _v_list(w, "features", f, 3, 8, True):
         for i, x in enumerate(f):
@@ -269,6 +294,15 @@ def theme_warnings(d, authors: set[str] | None = None) -> list[str]:
             _v_str(w, f"{L} title", x.get("title"), 0, 40, True)
             _v_str(w, f"{L} description", x.get("description"), 0, 140, True)
             _v_num(w, f"{L} value", x.get("value"), 0, None, True)
+
+    vb = _get(d, "vendorBonuses")
+    if _v_list(w, "vendorBonuses", vb, 0, 12):
+        for i, x in enumerate(vb):
+            x = x if isinstance(x, dict) else {}
+            L = f"vendorBonuses #{i + 1}"
+            _v_str(w, f"{L} title", x.get("title"), 0, 40, True)
+            _v_str(w, f"{L} description", x.get("description"), 0, 140)
+            _v_num(w, f"{L} value", x.get("value"), 0)
 
     q = _get(d, "faq")
     if _v_list(w, "faq", q, 4, 8):
@@ -296,7 +330,7 @@ def _all_strings(node, path=""):
 
 
 def link_errors(review: dict, fe_link: str, oto_links: list[str],
-                extra_allowed: list[str] | None = None) -> list[str]:
+                extra_allowed: list[str] | None = None, bundle_links: list[str] | None = None) -> list[str]:
     """Affiliate links must match the sheet exactly; no other URLs allowed."""
     errs = []
     fe_link = (fe_link or "").strip()
@@ -311,7 +345,15 @@ def link_errors(review: dict, fe_link: str, oto_links: list[str],
         if i < len(oto_links) and isinstance(oto, dict) and oto.get("link") != oto_links[i]:
             errs.append(f"OTO {i + 1} link does not match OTO link #{i + 1} in the sheet.")
 
-    allowed = {fe_link, *oto_links, *[u.strip() for u in (extra_allowed or []) if u]}
+    bundle_links = [x.strip() for x in (bundle_links or []) if x and x.strip()]
+    bundles = _get(review, "pricing.bundles") or []
+    if bundles and len(bundles) != len(bundle_links):
+        errs.append(f"Review has {len(bundles)} bundles but the sheet has {len(bundle_links)} bundle links.")
+    for i, b in enumerate(bundles):
+        if i < len(bundle_links) and isinstance(b, dict) and b.get("link") != bundle_links[i]:
+            errs.append(f"Bundle {i + 1} link does not match bundle link #{i + 1} in the sheet.")
+
+    allowed = {fe_link, *oto_links, *bundle_links, *[u.strip() for u in (extra_allowed or []) if u]}
     allowed.discard("")
     for path, s in _all_strings(review):
         for url in _URL_RE.findall(s):
@@ -323,11 +365,12 @@ def link_errors(review: dict, fe_link: str, oto_links: list[str],
 # ---------------------------------------------------------------- all together
 
 def validate(review: dict, *, fe_link: str, oto_links: list[str],
-             authors: set[str] | None, extra_allowed: list[str] | None = None) -> dict:
+             authors: set[str] | None, extra_allowed: list[str] | None = None,
+             bundle_links: list[str] | None = None) -> dict:
     return {
         "schema_errors": schema_errors(review),
         "theme_warnings": theme_warnings(review, authors),
-        "link_errors": link_errors(review, fe_link, oto_links, extra_allowed),
+        "link_errors": link_errors(review, fe_link, oto_links, extra_allowed, bundle_links),
     }
 
 
