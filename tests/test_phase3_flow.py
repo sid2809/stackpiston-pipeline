@@ -18,18 +18,18 @@ def _fake_fetch(pages):
     return f
 
 
-def test_full_flow_flags_conflicts_and_summer_est(monkeypatch):
+def test_full_flow_conflicts_are_settled_by_ai_with_warnings(monkeypatch):
     main = Source("https://v.com/jv/", "web", "x" * 900, [("https://v.com/jvdoc/", "JV Doc")], ["https://v.com/a.webp"])
     doc = Source("https://v.com/jvdoc/", "web", "y" * 900, [], [], ["https://player.vimeo.com/video/1"])
     monkeypatch.setattr(ex, "fetch", _fake_fetch({main.url: main, doc.url: doc}))
     page = dict(JV_PAGE, productName="Comic Videos AI")
-    res = ex.run(FakeClient([page, JV_DOC]), main.url)
-    joined = " | ".join(res.blocking)
-    assert not res.ok and "OTO count" in joined and "summer time" in joined
+    settled = {"facts": dict(page), "decisions": ["OTO 3: chose Agency (JV page) over Growth (JV doc)."]}
+    res = ex.run(FakeClient([page, JV_DOC, settled]), main.url)
+    assert res.ok  # disagreements no longer stop the row...
+    joined = " | ".join(res.warnings)
+    assert "chose Agency" in joined and "summer time" in joined  # ...they become warnings to check
     assert res.facts["cartOpenUtc"] == "2026-10-05T15:00:00Z"
     assert res.images == ["https://v.com/a.webp"] and res.videos == ["https://player.vimeo.com/video/1"]
-    assert res.input_tokens == 200
-
 
 def test_sheet_override_clears_time_problem(monkeypatch):
     main = Source("https://v.com/jv/", "web", "x" * 900)
@@ -78,36 +78,35 @@ def test_supporting_page_ai_failure_is_only_a_note(monkeypatch):
     assert any("AI could not read it" in n for n in res.notes)
 
 
-def test_notes_for_ai_override_sources_and_unblock_conflicts(monkeypatch):
+def test_notes_for_ai_override_ai_choices(monkeypatch):
     main = Source("https://v.com/jv/", "web", "x" * 900, [("https://v.com/jvdoc/", "JV Doc")])
     doc = Source("https://v.com/jvdoc/", "web", "y" * 900)
     monkeypatch.setattr(ex, "fetch", _fake_fetch({main.url: main, doc.url: doc}))
     page = dict(JV_PAGE, productName="Comic Videos AI",
                 otos=JV_PAGE["otos"] + [{"position": 5, "name": "DFY", "price": 127}],
                 bundles=[{"name": "Bundle", "price": 367}, {"name": "Mega Bundle", "price": None}])
+    settled = {"facts": dict(page), "decisions": ["kept JV page funnel"]}
     corrected = dict(page, otos=JV_PAGE["otos"],
                      bundles=[{"name": "Bundle", "price": 367}, {"name": "Mega Bundle", "price": 147},
                               {"name": "DFY", "price": 127}],
                      launch={"cartOpen": {"local": "2030-01-01 00:00", "zone": "UTC", "raw": "notes tried this"}})
-    client = FakeClient([page, JV_DOC, corrected])
-    res = ex.run(client, main.url, cart_open_override_utc="2026-10-05T15:00:00Z",
+    res = ex.run(FakeClient([page, JV_DOC, settled, corrected]), main.url,
+                 cart_open_override_utc="2026-10-05T15:00:00Z",
                  owner_notes="OTOs are only Pro, Automation, Agency, Growth. Mega Bundle $147. DFY is a bundle.")
-    assert res.ok, res.blocking  # source conflicts no longer block
+    assert res.ok, res.blocking
     assert [o["name"] for o in res.facts["otos"]] == ["Unlimited", "Pro", "Agency", "Growth"]
     assert [b["price"] for b in res.facts["bundles"]] == [367, 147, 127]
     assert res.facts["launch"]["cartOpen"]["raw"] == "10 AM EST"  # notes can't change launch times
-    assert any("your notes decide" in n for n in res.notes) and "Notes for AI applied." in res.notes
+    assert any("Notes for AI applied" in n for n in res.notes)
 
-
-def test_notes_do_not_unblock_time_or_missing_price(monkeypatch):
+def test_missing_price_still_blocks_and_summer_est_warns(monkeypatch):
     main = Source("https://v.com/jv/", "web", "x" * 900)
     monkeypatch.setattr(ex, "fetch", _fake_fetch({main.url: main}))
     page = dict(JV_PAGE, productName="X")
     still_missing = dict(page, otos=[{"position": 1, "name": "Pro", "price": None}])
     res = ex.run(FakeClient([page, still_missing]), main.url, owner_notes="Pro is the only OTO.")
-    joined = " | ".join(res.blocking)
-    assert "summer time" in joined and "has no price" in joined
-
+    assert any("has no price" in b for b in res.blocking)
+    assert any("summer time" in w for w in res.warnings)
 
 def test_no_notes_means_no_extra_ai_call(monkeypatch):
     main = Source("https://v.com/jv/", "web", "x" * 900)

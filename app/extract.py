@@ -18,12 +18,14 @@ from .timeparse import to_utc
 
 PROMPT = (Path(__file__).resolve().parent.parent / "prompts" / "extraction.md").read_text(encoding="utf-8")
 NOTES_PROMPT = (Path(__file__).resolve().parent.parent / "prompts" / "notes.md").read_text(encoding="utf-8")
+RECONCILE_PROMPT = (Path(__file__).resolve().parent.parent / "prompts" / "reconcile.md").read_text(encoding="utf-8")
 
 
 @dataclass
 class ExtractResult:
     facts: dict
-    blocking: list[str] = field(default_factory=list)
+    blocking: list[str] = field(default_factory=list)   # the row must stop
+    warnings: list[str] = field(default_factory=list)   # the AI decided something you should check (row stays a draft)
     notes: list[str] = field(default_factory=list)
     sources: list[dict] = field(default_factory=list)
     images: list[str] = field(default_factory=list)
@@ -84,7 +86,7 @@ def clean_facts(d) -> dict:
                      "value": _num(b.get("value"))} for b in _objs(d.get(key)) if b.get("title")]
     out["features"] = [{"title": str(f.get("title") or ""), "detail": str(f.get("detail") or "")}
                        for f in _objs(d.get("features")) if f.get("title")]
-    for k in ("goodFor", "limitations", "internalConflicts", "unknowns"):
+    for k in ("goodFor", "limitations", "offerNotes", "internalConflicts", "unknowns"):
         out[k] = _strs(d.get(k))
     return out
 
@@ -93,14 +95,14 @@ def extract_source(client, src: Source, role: str) -> tuple[dict, int, int]:
     user = (f"Source role: {role}\nSource URL: {src.url}\n"
             f"{'(Text was cut at 60,000 characters.)' if src.truncated else ''}\n\n"
             f"--- SOURCE TEXT START ---\n{src.text}\n--- SOURCE TEXT END ---")
-    r = client.complete_json(PROMPT, user, max_tokens=8000, temperature=0)
+    r = client.complete_json(PROMPT, user, max_tokens=16000, temperature=0)
     return clean_facts(r.data), r.input_tokens, r.output_tokens
 
 
 def apply_notes(client, facts: dict, notes: str) -> tuple[dict, int, int]:
     """Owner's 'Notes for AI' win over the vendor pages. Launch times are never taken from notes."""
     user = (f"OWNER NOTES:\n{notes.strip()}\n\nFACTS:\n{json.dumps(facts, ensure_ascii=False, indent=1)}")
-    r = client.complete_json(NOTES_PROMPT, user, max_tokens=8000)
+    r = client.complete_json(NOTES_PROMPT, user, max_tokens=16000)
     # Keys the AI left out keep their original values, so a partial reply can't wipe facts.
     reply = r.data if isinstance(r.data, dict) else {}
     out = clean_facts({**facts, **{k: v for k, v in reply.items() if k in facts}})
@@ -109,13 +111,45 @@ def apply_notes(client, facts: dict, notes: str) -> tuple[dict, int, int]:
     return out, r.input_tokens, r.output_tokens
 
 
+def reconcile(client, labelled: list[tuple[str, dict]], disagreements: list[str], today: str,
+              hints: dict | None = None) -> tuple[dict, list[str], int, int]:
+    """The AI picks the best value for each disagreement and says why. Launch info is kept from the base source."""
+    payload = {label: f for label, f in labelled}
+    hint = f"SHEET HINTS (affiliate links the site owner entered): {json.dumps(hints)}\n\n" if hints else ""
+    user = (hint + f"TODAY: {today}\n\nDISAGREEMENTS:\n- " + "\n- ".join(disagreements) +
+            f"\n\nFACTS BY SOURCE:\n{json.dumps(payload, ensure_ascii=False, indent=1)}")
+    r = client.complete_json(RECONCILE_PROMPT, user, max_tokens=16000)
+    reply = r.data if isinstance(r.data, dict) else {}
+    base = labelled[0][1]
+    chosen = reply.get("facts") if isinstance(reply.get("facts"), dict) else {}
+    facts = clean_facts({**base, **{k: v for k, v in chosen.items() if k in base}})
+    decisions = [str(d) for d in reply.get("decisions") or [] if str(d).strip()]
+    return facts, decisions, r.input_tokens, r.output_tokens
+
+
 # ------------------------------------------------------------------ comparing
 
 def _norm(s) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(s or "").lower())
 
 
-def _same_name(a, b) -> bool:
+GENERIC = {"oto", "upgrade", "upsell", "edition", "version", "package", "pack", "plan", "the", "and", "of",
+           "license", "access", "deal", "offer", "level", "tier"}
+
+
+def _tokens(name, product: str = "") -> set[str]:
+    def toks(x):
+        return {t[:-1] if len(t) > 3 and t.endswith("s") else t for t in re.findall(r"[a-z0-9]+", str(x or "").lower())}
+    drop = toks(product) | GENERIC
+    return {t for t in toks(name) if t not in drop and not t.isdigit()}
+
+
+def _same_name(a, b, product: str = "") -> bool:
+    """'Comic Videos AI Pro', 'PRO Upgrade' and 'ComicVideo AI Pro' are the same offer: compare the
+    words left after removing the product name and generic words (upgrade, OTO, edition...)."""
+    ta, tb = _tokens(a, product), _tokens(b, product)
+    if ta and tb:
+        return ta <= tb or tb <= ta
     na, nb = _norm(a), _norm(b)
     return bool(na) and bool(nb) and (na in nb or nb in na)
 
@@ -151,8 +185,9 @@ def compare(main: dict, other: dict, label: str) -> list[str]:
     if mo and oo:
         if len(mo) != len(oo):
             out.append(f"OTO count: main source lists {len(mo)}, {label} lists {len(oo)}.")
+        product = main.get("productName") or other.get("productName") or ""
         for i, (x, y) in enumerate(zip(mo, oo), 1):
-            if not _same_name(x.get("name"), y.get("name")):
+            if not _same_name(x.get("name"), y.get("name"), product):
                 out.append(f"OTO {i}: main source says '{x.get('name')}', {label} says '{y.get('name')}'.")
             elif _num(x.get("price")) is not None and _num(y.get("price")) is not None \
                     and _num(x.get("price")) != _num(y.get("price")):
@@ -217,7 +252,7 @@ def merge(main: dict, others: list[dict]) -> dict:
             m["otos"] = copy.deepcopy(o["otos"])
         else:
             for x, y in zip(m.get("otos") or [], o.get("otos") or []):
-                if _same_name(x.get("name"), y.get("name")):
+                if _same_name(x.get("name"), y.get("name"), m.get("productName") or ""):
                     for k in ("price", "priceType", "description", "downsell"):
                         if x.get(k) in (None, "") and y.get(k) not in (None, ""):
                             x[k] = y[k]
@@ -242,25 +277,45 @@ def merge(main: dict, others: list[dict]) -> dict:
 
 # ------------------------------------------------------------------ orchestration
 
-def run(client, main_url: str, sales_url: str | None = None,
+def run(client, main_urls, sales_url: str | None = None,
         cart_open_override_utc: str | None = None, cart_close_override_utc: str | None = None,
-        owner_notes: str | None = None) -> ExtractResult:
+        owner_notes: str | None = None, today: str | None = None, hints: dict | None = None) -> ExtractResult:
+    """main_urls: the JV page and/or JV doc from the sheet (a single URL also works)."""
+    from datetime import datetime, timezone
+    today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if isinstance(main_urls, str):
+        main_urls = [main_urls]
+    main_urls = [u.strip() for u in main_urls if u and u.strip()]
     res = ExtractResult(facts={})
-    try:
-        main_src = fetch(main_url)
-    except FetchError as e:
-        res.blocking.append(f"Main JV source could not be read: {e}")
-        return res
-    if main_src.thin:
-        res.blocking.append(f"Main JV source has almost no text ({len(main_src.text)} characters). "
-                            "The page may need JavaScript or the doc may be empty.")
+    if not main_urls:
+        res.blocking.append("Fill in the JV page URL or the JV doc URL.")
         return res
 
+    primaries: list[Source] = []
+    for u in main_urls:
+        try:
+            src = fetch(u)
+        except FetchError as e:
+            res.notes.append(f"Could not read {u}: {e}")
+            continue
+        if src.thin:
+            res.notes.append(f"{u} has almost no text (it may need JavaScript).")
+            continue
+        primaries.append(src)
+    if not primaries:
+        res.blocking.append("None of the JV sources could be read. " + " ".join(res.notes))
+        return res
+
+    seen = {p.url.rstrip("/") for p in primaries}
+    linked: list[str] = []
+    for p in primaries:
+        for u in pick_follow_links(p):
+            if u.rstrip("/") not in seen and u not in linked:
+                linked.append(u)
+    if sales_url and sales_url.rstrip("/") not in seen and sales_url not in linked:
+        linked.append(sales_url)
     supporting: list[Source] = []
-    urls = pick_follow_links(main_src)
-    if sales_url and sales_url not in urls:
-        urls.append(sales_url)
-    for u in urls:
+    for u in linked:
         try:
             s = fetch(u)
         except FetchError as e:
@@ -271,15 +326,27 @@ def run(client, main_url: str, sales_url: str | None = None,
             continue
         supporting.append(s)
 
-    all_src = [main_src] + supporting
-    for s in all_src:
+    for s in primaries + supporting:
         res.sources.append({"url": s.url, "kind": s.kind, "chars": len(s.text), "truncated": s.truncated})
         res.images += [i for i in s.images if i not in res.images]
         res.videos += [v for v in s.videos if v not in res.videos]
 
-    main_facts, ti, to = extract_source(client, main_src, "MAIN JV source (chosen by the site owner)")
-    res.input_tokens, res.output_tokens = ti, to
-    other_facts = []
+    labelled: list[tuple[str, dict]] = []
+    for i, s in enumerate(primaries):
+        role = "MAIN JV source (JV page or JV doc chosen by the site owner)"
+        try:
+            f, ti, to = extract_source(client, s, role)
+        except LLMError as e:
+            if i == 0 and len(primaries) == 1:
+                raise
+            res.notes.append(f"Skipped {s.url}: AI could not read it ({e}).")
+            continue
+        res.input_tokens += ti
+        res.output_tokens += to
+        labelled.append((f"main source {i + 1} ({s.url})", f))
+    if not labelled:
+        res.blocking.append("The AI could not read any JV source.")
+        return res
     for i, s in enumerate(supporting, 1):
         try:
             f, ti, to = extract_source(client, s, "supporting page linked from the JV source")
@@ -288,16 +355,28 @@ def run(client, main_url: str, sales_url: str | None = None,
             continue
         res.input_tokens += ti
         res.output_tokens += to
-        label = f"linked page {i} ({s.url})"
-        res.blocking += compare(main_facts, f, label)
-        res.notes += coupon_conflicts(main_facts, f, label)
-        res.notes += bundle_conflicts(main_facts, f, label)
-        other_facts.append(f)
+        labelled.append((f"linked page {i} ({s.url})", f))
 
-    for c in main_facts.get("internalConflicts") or []:
-        res.blocking.append(f"Main source contradicts itself: {c}")
+    base = labelled[0][1]
+    disagreements: list[str] = []
+    for label, f in labelled[1:]:
+        disagreements += compare(base, f, label)
+        res.notes += coupon_conflicts(base, f, label) + bundle_conflicts(base, f, label)
+    for label, f in labelled:
+        disagreements += [f"{label} contradicts itself: {c}" for c in f.get("internalConflicts") or []]
 
-    facts = merge(main_facts, other_facts)
+    others = [f for _, f in labelled[1:]]
+    facts = merge(base, others)
+    if disagreements:
+        try:
+            decided, decisions, ti, to = reconcile(client, labelled, disagreements, today, hints)
+            res.input_tokens += ti
+            res.output_tokens += to
+            facts = merge(decided, others)
+            res.warnings += decisions or [f"Sources disagreed ({len(disagreements)} points); the AI chose without explaining."]
+        except LLMError as e:
+            res.warnings += disagreements
+            res.warnings.append(f"The AI could not settle these, so the first JV source was used ({e}).")
 
     owner_notes = (owner_notes or "").strip()
     if owner_notes:
@@ -305,17 +384,12 @@ def run(client, main_url: str, sales_url: str | None = None,
             facts, ti, to = apply_notes(client, facts, owner_notes)
             res.input_tokens += ti
             res.output_tokens += to
+            res.notes.append("Notes for AI applied (they win over the AI's choices).")
         except LLMError as e:
             res.blocking.append(f"Notes for AI could not be applied: {e}")
             return res
-        # The owner has seen the sources and corrected them: source disagreements no longer block.
-        # Missing prices, link counts and time checks below still do.
-        demoted = [b for b in res.blocking if not b.startswith(("Cart open", "Cart close"))]
-        res.blocking = [b for b in res.blocking if b.startswith(("Cart open", "Cart close"))]
-        res.notes += [f"Sources disagreed, your notes decide: {d}" for d in demoted]
-        res.notes.append("Notes for AI applied.")
 
-    # times -> UTC (sheet overrides win and clear time problems)
+    # times -> UTC. Sheet entries win; ambiguous times become warnings (row stays a draft).
     launch = facts.get("launch") or {}
     for key, override, required in (("cartOpen", cart_open_override_utc, True),
                                     ("cartClose", cart_close_override_utc, False)):
@@ -326,12 +400,21 @@ def run(client, main_url: str, sales_url: str | None = None,
         t = launch.get(key) or {}
         if not t.get("local"):
             facts[f"{key}Utc"] = None
-            (res.blocking if required else res.notes).append(f"{name} not found in the sources.")
+            if required:
+                res.blocking.append(f"{name} not found in the sources. Fill Cart open in the sheet.")
+            else:
+                res.notes.append(f"{name} not found in the sources.")
             continue
         utc, problems = to_utc(t.get("local"), t.get("zone"))
         facts[f"{key}Utc"] = utc
-        for p in problems:
-            res.blocking.append(f"{name} ('{t.get('raw')}'): {p}")
+        if utc is None:
+            res.blocking.append(f"{name} ('{t.get('raw')}'): " + "; ".join(problems) + f" Fill {name} in the sheet.")
+        else:
+            res.warnings += [f"{name} ('{t.get('raw')}'): {p}" for p in problems]
+    open_utc = facts.get("cartOpenUtc")
+    if open_utc and open_utc[:10] < today and facts.get("cartCloseUtc") and facts["cartCloseUtc"][:10] < today:
+        res.warnings.append(f"The launch dates ({open_utc[:10]} to {facts['cartCloseUtc'][:10]}) are in the past. "
+                            "They may be leftovers from an older launch.")
 
     if not facts.get("productName"):
         res.blocking.append("Product name not found.")
@@ -340,6 +423,8 @@ def run(client, main_url: str, sales_url: str | None = None,
     for o in facts.get("otos") or []:
         if _num(o.get("price")) is None:
             res.blocking.append(f"OTO {o.get('position')} ({o.get('name')}) has no price.")
+    for n in facts.get("offerNotes") or []:
+        res.warnings.append(f"Offer choices: {n}")
     if facts.get("refundDays") is None:
         res.notes.append("Refund period not stated; that field will be left out.")
     if facts.get("bundles"):
@@ -352,8 +437,8 @@ def run(client, main_url: str, sales_url: str | None = None,
     nov = [b.get("title") for b in facts.get("vendorBonuses") or [] if b.get("value") is None]
     if nov:
         res.notes.append(f"{len(nov)} vendor bonus(es) have no stated value.")
-    if main_src.truncated:
-        res.notes.append("Main source was longer than 60,000 characters; the end was cut.")
+    if any(p.truncated for p in primaries):
+        res.notes.append("A JV source was longer than 60,000 characters; the end was cut.")
     res.facts = facts
     return res
 

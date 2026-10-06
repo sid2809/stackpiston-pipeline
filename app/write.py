@@ -408,7 +408,7 @@ def run(client, inp: Inputs, max_fixes: int = 2, today: str | None = None) -> Wr
         res.problems = [p + " (needs info)" for p in blocked]
         return res
     try:
-        r = client.complete_json(WRITER, _user_message(inp), max_tokens=12000)
+        r = client.complete_json(WRITER, _user_message(inp), max_tokens=16000)
     except LLMError as e:
         res.problems = [f"Writer failed: {e}"]
         return res
@@ -432,7 +432,7 @@ def run(client, inp: Inputs, max_fixes: int = 2, today: str | None = None) -> Wr
                    f"FACTS (for reference, do not change facts):\n"
                    f"{json.dumps({k: inp.facts.get(k) for k in ('productName', 'frontEnd', 'otos', 'bundles', 'coupons', 'vendorBonuses', 'refundDays')}, ensure_ascii=False)}")
         try:
-            r = client.complete_json(FIXER, fix_msg, max_tokens=12000)
+            r = client.complete_json(FIXER, fix_msg, max_tokens=16000)
         except LLMError as e:
             res.review, res.problems = review, problems + [f"Fixer failed: {e}"]
             return res

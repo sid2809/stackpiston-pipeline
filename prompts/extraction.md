@@ -8,6 +8,8 @@ Rules:
 - Cart open/close are when buyers can purchase. Affiliate contest start/end times are NOT cart times; use them only if the source says the cart or launch opens/closes at that moment. If the source only gives a launch length (e.g. "6-day launch"), leave cartClose null.
 - If the source gives two different values for the same thing, list both in "internalConflicts". Two labels for the same moment (e.g. 10 AM EST and 11 AM EDT) are not a conflict.
 - List OTOs in funnel order (OTO 1 first). A downsell belongs to the OTO it follows.
+- If the front end or an OTO comes in several choices or tiers (e.g. Personal/Commercial, Monthly/Lifetime), use the main one for "price" and describe the choices in "offerNotes".
+- Pages may contain leftovers from older launches (other product names, old dates). Record only what belongs to this product; if you see two launch date sets, list both in "internalConflicts".
 - A "bundle" is a separate offer that packages the front end and upsells together (often with its own funnel). Put bundles and their upsells in "bundles", not in "otos".
 - Ignore affiliate contest prizes, commission percentages, JV partner details, swipe emails and earnings claims.
 - Vendor bonuses are bonuses the vendor itself gives every buyer of the product. Record a value only if the source states one.
@@ -39,6 +41,7 @@ Return ONE JSON object, no prose, no code fences, with exactly these keys:
   "goodFor": [string],
   "limitations": [string],
   "salesPageUrl": string|null,
+  "offerNotes": [string],                // e.g. "Front end has Personal and Commercial tiers"; one line each
   "internalConflicts": [string],
   "unknowns": [string]
 }

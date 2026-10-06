@@ -55,21 +55,29 @@ class FakeWP:
 
 def make_row(n=2, **over):
     s = SAMPLE
-    vals = {"Status": "Run", "Product name": "ClipForge AI", "JV doc / JV page URL": "https://v.test/jv/",
+    vals = {"Status": "Run", "Product name": "ClipForge AI", "JV page URL": "https://v.test/jv/",
             "FE affiliate link": s["links"]["frontEnd"],
             "OTO links": "\n".join(o["link"] for o in s["pricing"]["otos"]), "Mode": "Draft"}
     vals.update(over)
     return Row(n, {norm(k): v for k, v in vals.items()})
 
 
+seen_calls: list = []
+extract_warnings: list = []
+
+
 @pytest.fixture
 def ctx(monkeypatch):
-    def fake_extract(client, url, sales=None, cart_open_override_utc=None, cart_close_override_utc=None, owner_notes=None):
+    seen_calls.clear()
+    extract_warnings.clear()
+    def fake_extract(client, urls, sales=None, cart_open_override_utc=None, cart_close_override_utc=None,
+                     owner_notes=None, hints=None):
+        seen_calls.append({"urls": urls, "hints": hints})
         f = facts_from_sample()
         f["productName"] = "Something Else"
         if cart_open_override_utc:
             f["cartOpenUtc"] = cart_open_override_utc
-        return ExtractResult(facts=f, notes=["source note"])
+        return ExtractResult(facts=f, notes=["source note"], warnings=list(extract_warnings))
     monkeypatch.setattr(runner.extract, "run", fake_extract)
 
     def make(rows, warnings=(), replies=None):
@@ -213,3 +221,57 @@ def test_rewrite_of_live_post_with_warnings_says_live(ctx):
     runner.poll(c, now_utc=NOW)
     out = c.sheet.final(2)
     assert out["Status"] == "Published" and "already live" in out["Messages"]
+
+
+def test_labels_in_link_cells_are_ignored(ctx):
+    links = [o["link"] for o in SAMPLE["pricing"]["otos"]]
+    labelled = "\n".join(f"OTO {i + 1}: {u}" for i, u in enumerate(links))
+    c = ctx([make_row(**{"OTO links": labelled, "FE affiliate link": "FE: " + SAMPLE["links"]["frontEnd"]})])
+    runner.poll(c, now_utc=NOW)
+    assert c.sheet.final(2)["Status"] == "Draft ready", c.sheet.final(2)["Messages"]
+    assert seen_calls[0]["hints"] == {"oto_links": len(links), "bundle_links": 0}
+
+
+def test_jv_page_and_jv_doc_both_used(ctx):
+    c = ctx([make_row(**{"JV doc URL": "https://docs.google.com/document/d/ABCDEFGHIJKLMNOPQRSTUVWXYZ/edit"})])
+    runner.poll(c, now_utc=NOW)
+    assert seen_calls[0]["urls"] == ["https://v.test/jv/", "https://docs.google.com/document/d/ABCDEFGHIJKLMNOPQRSTUVWXYZ/edit"]
+
+
+def test_old_combined_jv_column_still_works(ctx):
+    row = make_row()
+    row.values.pop(norm("JV page URL"))
+    row.values[norm("JV doc / JV page URL")] = "https://v.test/old/"
+    c = ctx([row])
+    runner.poll(c, now_utc=NOW)
+    assert seen_calls[0]["urls"] == ["https://v.test/old/"]
+
+
+def test_no_jv_url_needs_info(ctx):
+    c = ctx([make_row(**{"JV page URL": ""})], replies=[])
+    runner.poll(c, now_utc=NOW)
+    assert c.sheet.final(2)["Status"] == "Needs info" and "JV page URL or JV doc URL" in c.sheet.final(2)["Messages"]
+
+
+def test_ai_choices_keep_row_as_draft_even_in_publish_mode(ctx):
+    extract_warnings.append("OTO 3: chose Agency (JV page) over Growth (JV doc).")
+    c = ctx([make_row(Mode="Publish")])
+    runner.poll(c, now_utc=NOW)
+    out = c.sheet.final(2)
+    assert out["Status"] == "Draft ready" and [x["status"] for x in c.wp.calls] == ["draft"]
+    assert out["Messages"].startswith("Kept as draft") and "CHECK: OTO 3: chose Agency" in out["Messages"]
+
+
+def test_link_without_https_is_reported_clearly(ctx):
+    links = [o["link"] for o in SAMPLE["pricing"]["otos"]]
+    cell = "\n".join(links[:-1] + [links[-1].replace("https://", "")])
+    c = ctx([make_row(**{"OTO links": cell})], replies=[])
+    runner.poll(c, now_utc=NOW)
+    out = c.sheet.final(2)
+    assert out["Status"] == "Needs info" and "starting with https://" in out["Messages"] and not seen_calls
+
+
+def test_fe_cell_without_link_is_reported(ctx):
+    c = ctx([make_row(**{"FE affiliate link": "jvz1.com/c/1/2"})], replies=[])
+    runner.poll(c, now_utc=NOW)
+    assert "FE affiliate link: no link" in c.sheet.final(2)["Messages"]

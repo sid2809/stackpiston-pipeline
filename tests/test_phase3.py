@@ -97,3 +97,13 @@ def test_bundle_names_match_exactly_not_by_substring():
     other = {"bundles": [{"name": "DFY Bundle", "price": 127}, {"name": "ComicVideos AI DFY", "price": 167}]}
     c = bundle_conflicts(main, other, "p2")
     assert c == ["Bundle 'DFY' price: main $127, p2 $167."]
+
+
+def test_offer_names_match_despite_product_prefix_and_generic_words():
+    from app.extract import _same_name
+    p = "Comic Videos AI"
+    assert _same_name("Comic Videos AI Pro", "PRO Upgrade", p)
+    assert _same_name("Comic Videos AI Pro", "ComicVideo AI Pro", p)
+    assert _same_name("Comic Videos AI Automation", "Automation Upgrade", p)
+    assert not _same_name("Comic Videos AI Growth", "Agency Upgrade", p)  # a real conflict stays one
+    assert not _same_name("Comic Videos AI Pro", "Cinematic Sites AI Advanced", p)

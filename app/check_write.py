@@ -80,6 +80,8 @@ def main() -> int:
     for src in ex.sources:
         print(f"  - {src['kind']:4} {src['chars']:>6} chars  {src['url']}")
     print("EXTRACTION:\n" + extract.summary(ex) if ex.facts else "EXTRACTION: no facts")
+    for w in ex.warnings:
+        print(f"  ⚠ CHECK: {w}")
     for n in ex.notes:
         print(f"  • {n}")
     for b in ex.blocking:

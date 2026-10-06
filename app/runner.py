@@ -61,8 +61,13 @@ def _local_to_utc(value, tz: str, label: str) -> tuple[str | None, list[str]]:
 
 def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
     now_utc = now_utc or datetime.now(timezone.utc)
-    name, jv, fe = row.text("Product name"), row.text("JV doc / JV page URL"), row.text("FE affiliate link")
-    missing = [h for h, v in (("Product name", name), ("JV doc / JV page URL", jv), ("FE affiliate link", fe)) if not v]
+    name = row.text("Product name")
+    jv_urls = [u for u in (row.text("JV page URL") or row.text("JV doc / JV page URL"), row.text("JV doc URL")) if u]
+    fe_links = row.links("FE affiliate link")
+    fe = fe_links[0] if fe_links else ""
+    if row.text("FE affiliate link") and not fe:
+        return Result("Needs info", ["FE affiliate link: no link starting with https:// found in the cell."])
+    missing = [h for h, v in (("Product name", name), ("JV page URL or JV doc URL", jv_urls), ("FE affiliate link", fe)) if not v]
     if missing:
         return Result("Needs info", [f"Fill in: {', '.join(missing)}."])
 
@@ -84,10 +89,21 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
     if p1 + p2 + p3:
         return Result("Needs info", p1 + p2 + p3)
 
-    ex = extract.run(ctx.client, jv, row.text("Sales page URL") or None,
+    oto_links, bundle_links = row.links("OTO links"), row.links("Bundle links")
+    bad = []
+    for col, found in (("OTO links", oto_links), ("Bundle links", bundle_links)):
+        lines = row.lines(col)
+        if len(lines) != len(found):
+            bad.append(f"{col}: {len(lines)} line(s) but {len(found)} link(s) starting with https://. "
+                       "Put one full link per line (labels like 'OTO 1:' are fine).")
+    if bad:
+        return Result("Needs info", bad)
+    ex = extract.run(ctx.client, jv_urls, row.text("Sales page URL") or None,
                      cart_open_override_utc=open_utc, cart_close_override_utc=close_utc,
-                     owner_notes=row.text("Notes for AI") or None)
-    messages = list(ex.notes)
+                     owner_notes=row.text("Notes for AI") or None,
+                     hints={"oto_links": len(oto_links), "bundle_links": len(bundle_links)})
+    checks = [f"CHECK: {w}" for w in ex.warnings]
+    messages = checks + list(ex.notes)
     if not ex.ok:
         return Result("Needs info", ex.blocking + messages)
 
@@ -95,7 +111,7 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
     slug = row.text("Slug") or write.slugify(name)
     method_note = row.text("Method note used") or ctx.take_method_note()
     inp = write.Inputs(
-        facts=facts, fe_link=fe, oto_links=row.lines("OTO links"), bundle_links=row.lines("Bundle links"),
+        facts=facts, fe_link=fe, oto_links=oto_links, bundle_links=bundle_links,
         own_bonuses=ctx.bonuses, method_note=method_note, testing_notes=row.text("Testing notes"),
         days_tested=row.text("Days tested"), video_url=row.text("Video URL"), author=ctx.author,
         authors=None, slug=slug)
@@ -117,7 +133,11 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
     mode = row.text("Mode").lower()
     already_live = post.get("status") in ("publish", "future")
     if mode == "publish":
-        if warnings and already_live:
+        if checks and not already_live:
+            messages.insert(0, "Kept as draft: the AI made choices you should check (see CHECK lines).")
+            if warnings:
+                messages.append("Theme warnings: " + " | ".join(warnings))
+        elif warnings and already_live:
             messages.append("Post is already live and was updated, but the theme reported warnings: " + " | ".join(warnings))
         elif warnings:
             messages.append("Kept as draft because the theme reported warnings: " + " | ".join(warnings))

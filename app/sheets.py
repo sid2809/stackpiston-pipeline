@@ -8,7 +8,7 @@ from .config import SheetConfig
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 TABS = {
-    "Launches": ["Status", "Product name", "JV doc / JV page URL", "Sales page URL", "FE affiliate link",
+    "Launches": ["Status", "Product name", "Sales page URL", "FE affiliate link",
                  "OTO links", "Cart open", "Cart close", "Timezone", "Mode", "Publish at", "Days tested",
                  "Testing notes", "Video URL", "Rewrite", "WP post ID", "Slug", "Preview link", "Last run",
                  "Messages", "Post-launch done", "Method note used"],
@@ -16,7 +16,8 @@ TABS = {
     "Method notes": ["Note"],
     "Logs": ["Timestamp (IST)", "Row", "Slug", "Step", "Result", "Details"],
 }
-OPTIONAL = {"Launches": ["Bundle links", "Notes for AI"]}  # used when present; missing is only a note
+OPTIONAL = {"Launches": ["JV page URL", "JV doc URL", "Bundle links", "Notes for AI"]}
+JV_COLUMNS = ["JV page URL", "JV doc URL", "JV doc / JV page URL"]  # at least one must exist
 MAX_CELL = 49_000  # Google Sheets cell limit is 50,000 characters
 
 
@@ -42,6 +43,8 @@ def missing_headers(sh: gspread.Spreadsheet) -> list[str]:
         for h in needed:
             if norm(h) not in have:
                 problems.append(f"Tab '{tab}' has no column '{h}'.")
+        if tab == "Launches" and not any(norm(c) in have for c in JV_COLUMNS):
+            problems.append("Tab 'Launches' needs a 'JV page URL' or 'JV doc URL' column.")
     return problems
 
 
@@ -72,6 +75,11 @@ class Row:
 
     def lines(self, header: str) -> list[str]:
         return [x.strip() for x in str(self.get(header, "")).replace("\r", "\n").split("\n") if x.strip()]
+
+    def links(self, header: str) -> list[str]:
+        """URLs in a cell, one per line, ignoring labels like 'OTO 1:' or 'Bundle -'."""
+        import re
+        return re.findall(r"https?://[^\s,;]+", str(self.get(header, "")))
 
     def checked(self, header: str) -> bool:
         v = self.get(header, False)

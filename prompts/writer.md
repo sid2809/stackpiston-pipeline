@@ -41,7 +41,7 @@ Template and limits
   "caption": "≤100 chars",
   "videoTitle": "≤40 chars",
   "frontEnd": {"name": "≤32 chars", "items": ["1–4 items, each ≤48 chars"], "note": "≤120 chars, the 'Worth it?' answer"},
-  "otos": [{"position": 1, "name": "≤28 chars", "items": ["2–4, each ≤48"], "verdict": "worth_it|optional|skip",
+  "otos": [{"position": 1, "name": "≤28 chars, the short offer name without the product name or words like Upgrade (e.g. Unlimited, Pro)", "items": ["2–4, each ≤48"], "verdict": "worth_it|optional|skip",
             "note": "≤120 chars", "summary": "120–300 chars", "included": ["3–8, each ≤70"],
             "pros": ["1–4, each ≤70"], "cons": ["1–4, each ≤70"], "score": 0.0,
             "takeaway": "120–400 chars", "downsellNote": "≤40 chars, only if FACTS has a downsell, else empty"}],
