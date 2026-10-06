@@ -19,6 +19,11 @@ TABS = {
 MAX_CELL = 49_000  # Google Sheets cell limit is 50,000 characters
 
 
+def norm(header: str) -> str:
+    """Header match ignores capitals and extra spaces: 'REWRITE ' == 'Rewrite'."""
+    return " ".join(str(header).split()).lower()
+
+
 def open_sheet(cfg: SheetConfig) -> gspread.Spreadsheet:
     gc = gspread.service_account_from_dict(cfg.service_account, scopes=SCOPES)
     return gc.open_by_key(cfg.sheet_id)
@@ -32,9 +37,9 @@ def missing_headers(sh: gspread.Spreadsheet) -> list[str]:
         if ws is None:
             problems.append(f"Tab '{tab}' is missing.")
             continue
-        have = [h.strip() for h in ws.row_values(1)]
+        have = {norm(h) for h in ws.row_values(1)}
         for h in needed:
-            if h not in have:
+            if norm(h) not in have:
                 problems.append(f"Tab '{tab}' has no column '{h}'.")
     return problems
 
