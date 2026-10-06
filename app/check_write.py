@@ -6,6 +6,8 @@ WordPress or the sheet. Continues past extraction problems so the writing can be
 but prints them: a real run would stop there.
 
 Optional: CART_OPEN_UTC=2026-10-05T15:00:00Z (pretend Cart open is filled in the sheet).
+Optional: add --draft to also create a "[DRY RUN]" draft on WP_BASE_URL (use staging) so you can
+see the real page. Re-running replaces nothing: delete old dry-run drafts in wp-admin.
 """
 from __future__ import annotations
 
@@ -38,8 +40,30 @@ def sheet_extras():
         return DEFAULT_BONUS, "", f"defaults ({e.__class__.__name__})"
 
 
+def draft_preview(review: dict) -> None:
+    from .config import ConfigError, WPConfig
+    from .wordpress import WordPress, WPError
+    try:
+        cfg = WPConfig.from_env()
+        if "staging" not in cfg.base_url and os.environ.get("DRYRUN_ALLOW_LIVE") != "1":
+            print(f"\nDRAFT NOT CREATED: WP_BASE_URL is {cfg.base_url}, not staging. Dry-run drafts with "
+                  "placeholder links only go to staging (set DRYRUN_ALLOW_LIVE=1 to override).")
+            return
+        wp = WordPress(cfg)
+        r = dict(review, slug="dryrun-" + review.get("slug", "review"))
+        post = wp.save_review(review=r, title=f"[DRY RUN] {review['product']['name']} Review",
+                              post_id=None, want_status="draft")
+        print(f"\nDRAFT CREATED on {cfg.base_url}: post #{post['id']}")
+        print(f"  Preview (log into wp-admin first): {cfg.base_url}/?post_type=review&p={post['id']}&preview=true")
+        w = wp.warnings(post)
+        print(f"  Theme warnings: {len(w)}" + ("" if not w else " -> " + " | ".join(w)))
+    except (ConfigError, WPError) as e:
+        print(f"\nDRAFT NOT CREATED: {e}")
+
+
 def main() -> int:
-    args = sys.argv[1:]
+    make_draft = "--draft" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--draft"]
     if not args:
         print("FAIL  give a JV URL: python -m app.check_write <JV URL> [sales page URL]")
         return 1
@@ -50,7 +74,12 @@ def main() -> int:
     except LLMError as e:
         print(f"FAIL  {e}")
         return 1
+    print("SOURCES READ:")
+    for src in ex.sources:
+        print(f"  - {src['kind']:4} {src['chars']:>6} chars  {src['url']}")
     print("EXTRACTION:\n" + extract.summary(ex) if ex.facts else "EXTRACTION: no facts")
+    for n in ex.notes:
+        print(f"  • {n}")
     for b in ex.blocking:
         print(f"  ✗ (real run would stop here) {b}")
     if not ex.facts.get("productName"):
@@ -62,7 +91,8 @@ def main() -> int:
         facts=f, fe_link=PLACEHOLDER.format("fe"),
         oto_links=[PLACEHOLDER.format(f"oto{i + 1}") for i in range(len(f.get("otos") or []))],
         bundle_links=[PLACEHOLDER.format(f"bundle{i + 1}") for i in range(len(f.get("bundles") or []))],
-        own_bonuses=bonuses, method_note=method_note, authors=None)
+        own_bonuses=bonuses, method_note=method_note, authors=None,
+        author=os.environ.get("DEFAULT_AUTHOR", "marcus").strip() or "marcus")
     res = write.run(client, inp)
     print(f"\nWRITING: bonuses/method note from {src}; attempts used: {res.attempts} of 3")
     for n in res.notes:
@@ -73,7 +103,10 @@ def main() -> int:
     tin, tout = ex.input_tokens + res.input_tokens, ex.output_tokens + res.output_tokens
     print(f"\nAI usage (extract + write): {tin} input / {tout} output tokens")
     if res.review:
-        print("\nREVIEW JSON:\n" + json.dumps(res.review, ensure_ascii=False, indent=2))
+        # One line keeps the JSON in order in Railway's log viewer.
+        print("\nREVIEW JSON (one line):\n" + json.dumps(res.review, ensure_ascii=False))
+    if make_draft and res.review:
+        draft_preview(res.review)
     print("\nRESULT: " + ("WRITING OK (would create the draft)" if res.ok else "WRITING HAS PROBLEMS"))
     return 0
 

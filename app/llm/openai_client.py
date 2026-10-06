@@ -17,10 +17,21 @@ class OpenAIClient:
         self.model = model
         self.c = openai.OpenAI(api_key=key, max_retries=3, timeout=600)
 
-    def complete_json(self, system: str, user: str, max_tokens: int = 16000) -> LLMResult:
+    def complete_json(self, system: str, user: str, max_tokens: int = 16000,
+                      temperature: float | None = None) -> LLMResult:
         try:
+            return self._complete(system, user, max_tokens, temperature)
+        except LLMError as e:
+            # Some models only accept their default temperature: retry once without it.
+            if temperature is not None and "temperature" in str(e).lower():
+                return self._complete(system, user, max_tokens, None)
+            raise
+
+    def _complete(self, system: str, user: str, max_tokens: int, temperature: float | None) -> LLMResult:
+        try:
+            kw = {"temperature": temperature} if temperature is not None else {}
             r = self.c.chat.completions.create(
-                model=self.model, max_completion_tokens=max_tokens,
+                model=self.model, max_completion_tokens=max_tokens, **kw,
                 response_format={"type": "json_object"},
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
         except openai.AuthenticationError:

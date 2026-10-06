@@ -24,8 +24,20 @@ def facts_from_sample():
     }
 
 
+def _scrub(node):
+    """The sample text claims testing ('in our tests'); a real writer may not, so remove it."""
+    if isinstance(node, dict):
+        return {k: _scrub(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_scrub(v) for v in node]
+    if isinstance(node, str):
+        return (node.replace(" (about 2× faster in our tests)", "").replace(" in our tests", "")
+                .replace("we tested", "we found"))
+    return node
+
+
 def copy_from_sample():
-    s = SAMPLE
+    s = _scrub(SAMPLE)
     otos = []
     for i, o in enumerate(s["pricing"]["otos"]):
         otos.append({"position": i + 1, "name": o["name"], "items": o["items"], "verdict": o["verdict"],
@@ -58,7 +70,7 @@ class FakeClient:
     def __init__(self, replies):
         self.replies, self.calls = list(replies), 0
 
-    def complete_json(self, system, user, max_tokens=0):
+    def complete_json(self, system, user, max_tokens=0, **kw):
         self.calls += 1
         return LLMResult(self.replies.pop(0), "", 1000, 500, "fake")
 
@@ -145,3 +157,52 @@ def test_income_claim_in_vendor_bonus_is_flagged():
     client = FakeClient([c, fixed])
     res = run(client, inputs(facts=f), today="2026-10-06")
     assert res.ok and client.calls == 2 and res.review["vendorBonuses"][0]["title"] == "Lead Generation Case Study"
+
+
+def test_derived_amounts_allowed_but_others_flagged():
+    from app.write import allowed_amounts, price_mentions
+    f = {"frontEnd": {"price": 36.95, "priceAfterLaunch": 47},
+         "otos": [{"price": 67, "downsell": {"price": 47}}, {"price": 97}, {"price": 147}, {"price": 77}],
+         "bundles": [{"name": "Bundle", "price": 367}, {"name": "DFY", "price": 127}],
+         "coupons": [{"code": "CVB100", "discount": "$100 off", "appliesTo": "Bundle"},
+                     {"code": "DFY30", "discount": "$30 off", "appliesTo": "DFY"}]}
+    allowed = allowed_amounts(f, [{"value": 97}])
+    ok_text = ("Front end $36.95, rising to $47 (+$10.05). Pro $67 or the $47 downsell (save $20). "
+               "Full funnel $424.95; the $367 bundle saves $57.95, or $267 with CVB100. DFY is $97 with the $30 coupon.")
+    review = {"faq": [{"q": "Price?", "a": ok_text}]}
+    assert price_mentions(review, allowed) == []
+    bad = {"faq": [{"q": "Earnings?", "a": "One user made $10,060 in a month and only pays $5."}]}
+    flagged = " | ".join(price_mentions(bad, allowed))
+    assert "$10,060" in flagged and "$5" in flagged
+
+
+def test_testing_statements_are_flagged_but_badge_is_fine():
+    c = copy_from_sample()
+    c["cons"] = c["cons"][:2] + ["Not hands-on tested by us"]
+    c["pros"] = [p.replace(" in our tests", "") for p in c["pros"]]
+    fixed = copy.deepcopy(c)
+    fixed["cons"] = c["cons"][:2] + ["Template library is thin"]
+    client = FakeClient([c, fixed])
+    res = run(client, inputs(), today="2026-10-06")
+    assert res.ok and client.calls == 2 and res.review["review"]["trustBadge"] == "Bought & tested"
+
+
+def test_coupon_codes_combined_from_all_sources():
+    from app.extract import merge
+    main = {"coupons": [{"code": "", "discount": "$10 off"}]}
+    other = {"coupons": [{"code": "CVAI6OFF", "discount": "$6 off", "appliesTo": "Front end"}]}
+    assert [c["code"] for c in merge(main, [other])["coupons"] if c["code"]] == ["CVAI6OFF"]
+
+
+def test_testing_check_has_no_false_positives():
+    import re as _re
+    from app import write as w
+    src = open(w.__file__).read()
+    pat = _re.search(r'tested_re = re.compile\((.*?), re.I\)', src, _re.S).group(1)
+    rx = _re.compile(eval(pat.replace("\n", " ")), _re.I)
+    flagged = ["Not hands-on tested by us", "In our tests it was fast", "We tested it for a week",
+               "It hasn't been tested yet", "We've tested every OTO", "Personally tested by our team"]
+    clean = ["A/B testing is not included", "The vendor did not share testimonials",
+             "Split testing isn't available", "It doesn't include a test mode", "Did not offer A/B testing"]
+    assert all(rx.search(t) for t in flagged)
+    assert not any(rx.search(t) for t in clean)

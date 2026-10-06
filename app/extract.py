@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .fetch import FetchError, Source, fetch, pick_follow_links
+from .llm import LLMError
 from .timeparse import to_utc
 
 PROMPT = (Path(__file__).resolve().parent.parent / "prompts" / "extraction.md").read_text(encoding="utf-8")
@@ -90,7 +91,7 @@ def extract_source(client, src: Source, role: str) -> tuple[dict, int, int]:
     user = (f"Source role: {role}\nSource URL: {src.url}\n"
             f"{'(Text was cut at 60,000 characters.)' if src.truncated else ''}\n\n"
             f"--- SOURCE TEXT START ---\n{src.text}\n--- SOURCE TEXT END ---")
-    r = client.complete_json(PROMPT, user, max_tokens=8000)
+    r = client.complete_json(PROMPT, user, max_tokens=8000, temperature=0)
     return clean_facts(r.data), r.input_tokens, r.output_tokens
 
 
@@ -208,7 +209,12 @@ def merge(main: dict, others: list[dict]) -> dict:
                             x[k] = y[k]
                     if not x.get("items") and y.get("items"):
                         x["items"] = y["items"]
-        for k in ("bundles", "coupons", "features", "goodFor", "limitations"):
+        have_codes = {_norm(c.get("code")) for c in m.get("coupons") or [] if c.get("code")}
+        for c in o.get("coupons") or []:
+            if c.get("code") and _norm(c["code"]) not in have_codes:
+                m.setdefault("coupons", []).append(c)
+                have_codes.add(_norm(c["code"]))
+        for k in ("bundles", "features", "goodFor", "limitations"):
             if not m.get(k) and o.get(k):
                 m[k] = copy.deepcopy(o[k])
         have = {_norm(b.get("title")) for b in m.get("vendorBonuses") or []}
@@ -259,7 +265,11 @@ def run(client, main_url: str, sales_url: str | None = None,
     res.input_tokens, res.output_tokens = ti, to
     other_facts = []
     for i, s in enumerate(supporting, 1):
-        f, ti, to = extract_source(client, s, "supporting page linked from the JV source")
+        try:
+            f, ti, to = extract_source(client, s, "supporting page linked from the JV source")
+        except LLMError as e:
+            res.notes.append(f"Skipped linked page {s.url}: AI could not read it ({e}).")
+            continue
         res.input_tokens += ti
         res.output_tokens += to
         label = f"linked page {i} ({s.url})"

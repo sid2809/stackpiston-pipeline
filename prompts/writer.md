@@ -8,6 +8,7 @@ Output rules
 - "otos" must have exactly the same count and order as FACTS.otos (position 1 first). Same for "bundles" (FACTS.bundles) and "vendorBonuses" (FACTS.vendorBonuses).
 - Never write URLs.
 - Testing: describe specific test results (timings, counts, outcomes) only if TESTING NOTES contain them. Otherwise describe what the product does, based on FACTS, without claiming measured results.
+- Never say whether the product was or wasn't tested (no "not tested by us", no "in our tests"). The page shows testing status separately.
 
 Voice
 - Energetic but credible. Plain, direct sentences for a buyer deciding in the next five minutes.

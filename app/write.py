@@ -238,31 +238,50 @@ _PRICE_RE = re.compile(r"\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})
 
 
 def allowed_amounts(facts: dict, own_bonuses: list[dict]) -> set[str]:
-    nums = set()
-    fe = facts.get("frontEnd") or {}
+    """Every dollar amount the text may mention: real prices plus amounts derived from them."""
+    nums: set[str] = set()
 
     def add(v):
-        if v is not None:
-            try:
+        try:
+            if v is not None and float(v) > 0:
                 nums.add(_money(v))
-            except (TypeError, ValueError):
-                pass
-    add(fe.get("price"))
+        except (TypeError, ValueError):
+            pass
+
+    fe = facts.get("frontEnd") or {}
+    fe_price = float(fe.get("price") or 0)
+    base = [fe_price]                              # prices a coupon could apply to
+    add(fe_price)
     add(fe.get("priceAfterLaunch"))
-    total = float(fe.get("price") or 0)
+    if fe.get("priceAfterLaunch"):
+        add(float(fe["priceAfterLaunch"]) - fe_price)       # "rises by $X"
+    total = fe_price
     for o in facts.get("otos") or []:
         add(o.get("price"))
+        base.append(float(o.get("price") or 0))
         total += float(o.get("price") or 0)
-        add((o.get("downsell") or {}).get("price"))
-    add(total)
+        ds = (o.get("downsell") or {}).get("price")
+        add(ds)
+        if ds is not None and o.get("price") is not None:
+            add(float(o["price"]) - float(ds))              # downsell saving
+    add(total)                                               # full funnel
     for b in facts.get("bundles") or []:
         add(b.get("price"))
+        if b.get("price") is not None:
+            base.append(float(b["price"]))
+            add(total - float(b["price"]))                   # bundle saving vs buying separately
+    discounts = []
+    for cpn in facts.get("coupons") or []:
+        for m in _PRICE_RE.findall(str(cpn.get("discount") or "")):
+            d = float(m.replace(",", ""))
+            discounts.append(d)
+            add(d)
+    for p in base:
+        for d in discounts:
+            add(p - d)                                       # price after coupon
     for x in (facts.get("vendorBonuses") or []) + (own_bonuses or []):
         add(x.get("value"))
     add(sum(float(b.get("value") or 0) for b in own_bonuses or []))
-    for cpn in facts.get("coupons") or []:
-        for m in _PRICE_RE.findall(str(cpn.get("discount") or "")):
-            add(m.replace(",", ""))
     return nums
 
 
@@ -294,12 +313,33 @@ def price_mentions(review: dict, allowed: set[str]) -> list[str]:
 
 # ------------------------------------------------------------------ run
 
+def _strings(node, path=""):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield from _strings(v, f"{path}.{k}" if path else k)
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from _strings(v, f"{path}[{i}]")
+    elif isinstance(node, str):
+        yield path, node
+
+
 def _check(review: dict, inp: Inputs) -> list[str]:
     extra = [inp.video_url] if inp.video_url else []
     res = validate(review, fe_link=inp.fe_link, oto_links=inp.oto_links, authors=inp.authors,
                    extra_allowed=extra, bundle_links=inp.bundle_links)
     probs = res["schema_errors"] + res["theme_warnings"] + res["link_errors"]
     probs += price_mentions(review, allowed_amounts(inp.facts, inp.own_bonuses))
+    tested_re = re.compile(r"\b(not|never|\w+n't)\W+(\w+\W+){0,3}?tested\b|\bin our tests?\b|\bwe(\s+have|'ve)?\s+tested\b"
+                           r"|\b(hands-on|personally)\s+tested\b", re.I)
+    for path, text in _strings(review):
+        if not path.startswith(("review.methodNote", "review.trustBadge", "review.testedNote")) and tested_re.search(text):
+            probs.append(f"{path} talks about testing (\"{text[:60]}\"). Remove any statement about whether it was tested.")
+    for key, lead in (("goodFor", "Buy it if you…"), ("notFor", "Skip it if you…")):
+        for i, item in enumerate(review.get(key) or []):
+            if isinstance(item, str) and item[:1].isupper():
+                probs.append(f"{key} #{i + 1} \"{item}\" must complete \"{lead}\" and start with a lowercase verb; "
+                             "move product facts to pros instead.")
     return probs
 
 

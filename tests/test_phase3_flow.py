@@ -8,7 +8,7 @@ class FakeClient:
     def __init__(self, replies):
         self.replies = list(replies)
 
-    def complete_json(self, system, user, max_tokens=0):
+    def complete_json(self, system, user, max_tokens=0, **kw):
         return LLMResult(self.replies.pop(0), "", 100, 50, "fake")
 
 
@@ -57,3 +57,22 @@ def test_sloppy_ai_output_does_not_crash(monkeypatch):
     assert res.facts["frontEnd"]["price"] == 1017.0
     assert res.facts["otos"] == [res.facts["otos"][0]] and res.facts["otos"][0]["price"] == 67.0
     assert any("Cart open not found" in b for b in res.blocking)
+
+
+def test_supporting_page_ai_failure_is_only_a_note(monkeypatch):
+    from app.llm import LLMError
+    main = Source("https://v.com/jv/", "web", "x" * 900, [("https://v.com/jvdoc/", "JV Doc")])
+    doc = Source("https://v.com/jvdoc/", "web", "y" * 900)
+    monkeypatch.setattr(ex, "fetch", _fake_fetch({main.url: main, doc.url: doc}))
+
+    class Flaky:
+        n = 0
+
+        def complete_json(self, *a, **k):
+            self.n += 1
+            if self.n == 2:
+                raise LLMError("Reply was cut off")
+            return LLMResult(dict(JV_PAGE, productName="X"), "", 1, 1, "f")
+    res = ex.run(Flaky(), main.url, cart_open_override_utc="2026-10-05T15:00:00Z")
+    assert res.facts["productName"] == "X"
+    assert any("AI could not read it" in n for n in res.notes)
