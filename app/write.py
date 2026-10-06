@@ -356,6 +356,12 @@ def _check(review: dict, inp: Inputs) -> list[str]:
     for path, text in _strings(review):
         if absent_re.search(text):
             probs.append(f"{path} claims there are no bonuses (\"{text[:60]}\"). Don't state that; leave it out.")
+    rev_otos = (review.get("pricing") or {}).get("otos") or []
+    for i, of in enumerate(inp.facts.get("otos") or []):
+        if not of.get("items") and not of.get("description") and i < len(rev_otos) \
+                and rev_otos[i].get("verdict") != "skip":
+            probs.append(f"OTO {i + 1} verdict is \"{rev_otos[i].get('verdict')}\" but FACTS has no contents for it; "
+                         "set its verdict to skip (or add its contents in Notes for AI).")
     for key, lead in (("goodFor", "Buy it if you…"), ("notFor", "Skip it if you…")):
         for i, item in enumerate(review.get(key) or []):
             if isinstance(item, str) and item[:1].isupper():

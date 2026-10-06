@@ -17,6 +17,7 @@ def facts_from_sample():
         "frontEnd": {"name": s["pricing"]["frontEnd"]["name"], "price": s["pricing"]["frontEnd"]["price"],
                      "priceAfterLaunch": s["pricing"]["frontEnd"]["priceAfterLaunch"], "priceType": "one-time"},
         "otos": [{"position": i + 1, "name": o["name"], "price": o["price"],
+                  "items": o["items"], "description": o["summary"],
                   "downsell": ({"name": o["downsell"]["name"], "price": o["downsell"]["price"]} if o.get("downsell") else None)}
                  for i, o in enumerate(s["pricing"]["otos"])],
         "bundles": [], "coupons": [], "vendorBonuses": [],
@@ -297,3 +298,17 @@ def test_extraction_keeps_affiliate_and_vendor_bonuses_apart():
     m = merge(a, [b])
     assert [x["title"] for x in m["vendorBonuses"]] == ["V1"]
     assert [x["title"] for x in m["affiliateBonuses"]] == ["A1", "A2"] and m["affiliateBonuses"][0]["value"] == 27.0
+
+
+def test_oto_without_contents_must_be_skip():
+    f = facts_from_sample()
+    for o in f["otos"]:
+        o["items"], o["description"] = ["x"], "described"
+    f["otos"][2]["items"], f["otos"][2]["description"] = [], None
+    bad = copy_from_sample()
+    bad["otos"][2]["verdict"] = "optional"
+    good = copy.deepcopy(bad)
+    good["otos"][2]["verdict"] = "skip"
+    client = FakeClient([bad, good])
+    res = run(client, inputs(facts=f), today="2026-10-06")
+    assert res.ok and client.calls == 2 and res.review["pricing"]["otos"][2]["verdict"] == "skip"

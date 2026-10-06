@@ -17,6 +17,7 @@ Voice
 - Be specific about what it does, for whom, and what it costs. No hype words ("revolutionary", "game-changer", "insane", "secret").
 - No income claims, no earnings figures, no guaranteed results, even if the vendor makes them.
 - Honest verdicts: "worth_it", "optional" or "skip". A typical funnel has one or two worth_it OTOs; resellers and whitelabels are usually skip.
+- If FACTS gives no items and no description for an OTO, its verdict must be "skip": you can't recommend what isn't described.
 - Bundles are bought instead of the front end. Say who a bundle suits (someone who would buy two or more upsells anyway) and whether it is worth it.
 - goodFor / notFor complete "Buy it if you…" / "Skip it if you…": start with a lowercase verb.
 
