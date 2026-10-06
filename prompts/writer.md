@@ -7,6 +7,7 @@ Output rules
 - Use only facts from FACTS. Never invent features, numbers, results, prices or refund terms. If something isn't in FACTS, leave it out.
 - "otos" must have exactly the same count and order as FACTS.otos (position 1 first). Same for "bundles" (FACTS.bundles) and "vendorBonuses" (FACTS.vendorBonuses).
 - Never write URLs.
+- Never claim something is absent just because FACTS doesn't mention it (e.g. never write "the vendor has no bonuses" or "there is no refund"). Say it isn't stated, or leave it out.
 - Testing: describe specific test results (timings, counts, outcomes) only if TESTING NOTES contain them. Otherwise describe what the product does, based on FACTS, without claiming measured results.
 - Never say whether the product was or wasn't tested (no "not tested by us", no "in our tests"). The page shows testing status separately.
 

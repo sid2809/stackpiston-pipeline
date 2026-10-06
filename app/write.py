@@ -336,6 +336,11 @@ def _check(review: dict, inp: Inputs) -> list[str]:
     for path, text in _strings(review):
         if not path.startswith(("review.methodNote", "review.trustBadge", "review.testedNote")) and tested_re.search(text):
             probs.append(f"{path} talks about testing (\"{text[:60]}\"). Remove any statement about whether it was tested.")
+    absent_re = re.compile(r"\b(vendor|seller)\b[^.]{0,40}\b(no|doesn't (offer|list|include|have)|lists no|offers no)\b[^.]{0,25}\bbonus"
+                           r"|\bno (buyer |vendor |extra )?bonuses\b", re.I)
+    for path, text in _strings(review):
+        if absent_re.search(text):
+            probs.append(f"{path} claims there are no bonuses (\"{text[:60]}\"). Don't state that; leave it out.")
     for key, lead in (("goodFor", "Buy it if you…"), ("notFor", "Skip it if you…")):
         for i, item in enumerate(review.get(key) or []):
             if isinstance(item, str) and item[:1].isupper():

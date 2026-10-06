@@ -241,3 +241,12 @@ def test_unknown_price_type_is_not_claimed_as_one_time():
     f["frontEnd"]["priceType"] = "one-time"
     review, _, _ = assemble(copy_from_sample(), inputs(facts=f), "2026-10-06")
     assert review["pricing"]["frontEnd"]["priceType"] == "one-time"
+
+
+def test_claiming_vendor_has_no_bonuses_is_flagged():
+    from app.write import _check
+    good, _, _ = assemble(copy_from_sample(), inputs(), "2026-10-06")
+    assert not any("no bonuses" in p for p in _check(good, inputs()))
+    bad = copy.deepcopy(good)
+    bad["faq"][3]["a"] = "Buy through our link. The vendor lists no buyer bonuses of its own."
+    assert any("claims there are no bonuses" in p for p in _check(bad, inputs()))
