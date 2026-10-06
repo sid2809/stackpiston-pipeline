@@ -9,7 +9,8 @@ Full plan: see the "StackPiston Pipeline: Build Plan & Phases" doc.
 - [x] Phase 1: WordPress client — live check passed on staging
 - [~] Phase 3: read JV sources — check: `python -m app.check_extract <JV URL> [sales URL]`
 - [x] Theme 1.1.0 support: bundles, coupons, vendor bonuses (validator matches theme exactly)
-- [ ] Phases 4–8
+- [~] Phase 4: write review — dry run: `python -m app.check_write <JV URL> [sales URL]`
+- [ ] Phases 5–8
 
 Email notifications are deferred: while SMTP settings are empty, results appear only in the sheet.
 
