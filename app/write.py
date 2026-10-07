@@ -44,6 +44,7 @@ class Inputs:
     testing_notes: str = ""
     days_tested: str = ""
     video_url: str = ""
+    image_url: str = ""
     author: str = "marcus"
     authors: set[str] | None = None
     slug: str | None = None
@@ -183,7 +184,7 @@ def assemble(copy_: dict, inp: Inputs, today: str | None = None) -> tuple[dict, 
         review["media"] = {"type": "video", "videoUrl": inp.video_url, "videoTitle": c.get("videoTitle", ""),
                            "caption": c.get("caption", "")}
     else:
-        review["media"] = {"type": "image", "imageUrl": "", "imageAlt": c.get("imageAlt", ""),
+        review["media"] = {"type": "image", "imageUrl": inp.image_url, "imageAlt": c.get("imageAlt", ""),
                            "caption": c.get("caption", "")}
 
     otos = []
@@ -340,7 +341,7 @@ def _strings(node, path=""):
 
 
 def _check(review: dict, inp: Inputs) -> list[str]:
-    extra = [inp.video_url] if inp.video_url else []
+    extra = [u for u in (inp.video_url, inp.image_url) if u]
     res = validate(review, fe_link=inp.fe_link, oto_links=inp.oto_links, authors=inp.authors,
                    extra_allowed=extra, bundle_links=inp.bundle_links)
     probs = res["schema_errors"] + res["theme_warnings"] + res["link_errors"]

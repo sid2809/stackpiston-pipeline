@@ -30,6 +30,8 @@ class ExtractResult:
     sources: list[dict] = field(default_factory=list)
     images: list[str] = field(default_factory=list)
     videos: list[str] = field(default_factory=list)
+    video_candidates: list[dict] = field(default_factory=list)  # {"url", "context", "source"}
+    image_candidates: list[dict] = field(default_factory=list)  # {"url", "alt", "source", "sales"}
     input_tokens: int = 0
     output_tokens: int = 0
 
@@ -330,6 +332,14 @@ def run(client, main_urls, sales_url: str | None = None,
         res.sources.append({"url": s.url, "kind": s.kind, "chars": len(s.text), "truncated": s.truncated})
         res.images += [i for i in s.images if i not in res.images]
         res.videos += [v for v in s.videos if v not in res.videos]
+        # The sales page from the sheet, or a linked preview/sales page, holds the buyer-facing images.
+        is_sales = (bool(sales_url) and s.url.rstrip("/") == sales_url.rstrip("/")) or \
+            (s.kind == "web" and any(s is x for x in supporting))
+        where = "the sales page" if is_sales else ("the JV doc" if s.kind == "gdoc" else s.url)
+        known_v = {c["url"] for c in res.video_candidates}
+        res.video_candidates += [dict(v, source=where) for v in s.video_info if v["url"] not in known_v]
+        known_i = {c["url"] for c in res.image_candidates}
+        res.image_candidates += [dict(i, source=where, sales=is_sales) for i in s.image_info if i["url"] not in known_i]
 
     labelled: list[tuple[str, dict]] = []
     for i, s in enumerate(primaries):

@@ -21,8 +21,10 @@ MAX_TEXT = 60_000
 MIN_USEFUL_TEXT = 500
 GDOC_RE = re.compile(r"docs\.google\.com/document/d/(?!e/)([A-Za-z0-9_-]{20,})")
 GDOC_PUB_RE = re.compile(r"docs\.google\.com/document/d/e/[A-Za-z0-9_-]+/pub")
-VIDEO_RE = re.compile(r"(youtube\.com/(embed/|watch\?v=)|youtu\.be/|player\.vimeo\.com/video/|vimeo\.com/\d+|"
-                      r"fast\.wistia\.net|wistia\.com/medias)", re.I)
+VIDEO_RE = re.compile(r"(youtube\.com/(embed/|watch\?v=|shorts/)|youtu\.be/|player\.vimeo\.com/video/|vimeo\.com/\d+|"
+                      r"fast\.wistia\.net|wistia\.com/(medias|s)/|wi\.st/)", re.I)
+BLOCKS = ["p", "li", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6", "figure", "div", "section"]
+URL_IN_TEXT = re.compile(r"https?://\S+")
 FOLLOW_RE = re.compile(r"jv.?doc|bonus|preview|sales.?page", re.I)
 SKIP_RE = re.compile(r"swipe|affiliate|request|contest|jvzoo\.com|warriorplus|facebook|twitter|"
                      r"skype|youtube|vimeo|mailto:", re.I)
@@ -41,6 +43,8 @@ class Source:
     images: list[str] = field(default_factory=list)
     videos: list[str] = field(default_factory=list)
     truncated: bool = False
+    video_info: list[dict] = field(default_factory=list)  # {"url", "context"}: the label next to each video
+    image_info: list[dict] = field(default_factory=list)  # {"url", "alt"}
 
     @property
     def thin(self) -> bool:
@@ -76,8 +80,10 @@ def html_to_parts(html: str, base_url: str) -> tuple[str, list, list, list]:
     videos: list[str] = []
     for tag in soup.find_all(["iframe", "a", "source", "video"]):
         u = tag.get("src") or tag.get("href") or tag.get("data-src") or ""
+        if u:
+            u = _unwrap(urljoin(base_url, u))
         if u and VIDEO_RE.search(u):
-            videos.append(urljoin(base_url, u))
+            videos.append(u)
     links = []
     for a in soup.find_all("a", href=True):
         href = a["href"].strip()
@@ -102,6 +108,54 @@ def html_to_parts(html: str, base_url: str) -> tuple[str, list, list, list]:
         seen.add(line)
         lines.append(line)
     return "\n".join(lines), _dedupe(links), _dedupe(images), _dedupe(videos)
+
+
+def _words(text: str) -> str:
+    return " ".join(URL_IN_TEXT.sub(" ", text or "").split())
+
+
+def _context(tag) -> str:
+    """The text label next to a video: its own block, or the block just before it if its own has no words."""
+    block = tag.find_parent(BLOCKS) or tag
+    own = _words(block.get_text(" "))[:300]
+    own_words = len(own.split()) - len(_words(tag.get_text(" ")).split())
+    if own_words >= 2:
+        return own
+    ancestors = set(id(p) for p in block.parents)
+    for prev in block.find_all_previous(BLOCKS, limit=8):
+        if id(prev) in ancestors:
+            continue
+        t = _words(prev.get_text(" "))
+        if t:
+            return (t[:200] + " " + own).strip()
+    return own
+
+
+def media_parts(html: str, base_url: str) -> tuple[list[dict], list[dict]]:
+    """Videos with their nearby label, and images with their alt text (for Phase 6)."""
+    soup = BeautifulSoup(html, "html.parser")
+    for t in soup(["script", "style", "noscript", "template", "head"]):
+        t.decompose()
+    videos, seen = [], set()
+    for tag in soup.find_all(["iframe", "a", "source", "video"]):
+        u = tag.get("src") or tag.get("href") or tag.get("data-src") or ""
+        if not u:
+            continue
+        u = _unwrap(urljoin(base_url, u))
+        if VIDEO_RE.search(u) and u not in seen:
+            seen.add(u)
+            videos.append({"url": u, "context": _context(tag)})
+    images, seen = [], set()
+    for img in soup.find_all("img"):
+        u = img.get("data-src") or img.get("src") or ""
+        if not u and img.get("srcset"):
+            u = img["srcset"].split(",")[0].split()[0]
+        if u and not u.startswith("data:"):
+            u = urljoin(base_url, u)
+            if u not in seen:
+                seen.add(u)
+                images.append({"url": u, "alt": " ".join((img.get("alt") or img.get("title") or "").split())[:120]})
+    return videos, images
 
 
 def _unwrap(u: str) -> str:
@@ -134,6 +188,7 @@ def fetch(url: str, session: requests.Session | None = None) -> Source:
         text = _get(s, base + "txt").content.decode("utf-8", errors="replace").lstrip("\ufeff")
         html = _get(s, base + "html").text
         _, links, images, videos = html_to_parts(html, url)
+        video_info, image_info = media_parts(html, url)
         text = "\n".join(" ".join(x.split()) for x in text.splitlines() if x.strip())
         kind = "gdoc"
     else:
@@ -141,9 +196,10 @@ def fetch(url: str, session: requests.Session | None = None) -> Source:
         if "html" not in r.headers.get("Content-Type", "html"):
             raise FetchError(f"{url} is not a web page ({r.headers.get('Content-Type')}).")
         text, links, images, videos = html_to_parts(r.text, r.url)
+        video_info, image_info = media_parts(r.text, r.url)
         kind = "web"
     truncated = len(text) > MAX_TEXT
-    return Source(url, kind, text[:MAX_TEXT], links, images, videos, truncated)
+    return Source(url, kind, text[:MAX_TEXT], links, images, videos, truncated, video_info, image_info)
 
 
 def pick_follow_links(main: Source, limit: int = 3) -> list[str]:

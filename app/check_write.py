@@ -16,7 +16,7 @@ import json
 import os
 import sys
 
-from . import extract, write
+from . import extract, media, write
 from .llm import LLMError, get_client
 
 PLACEHOLDER = "https://www.jvzoo.com/c/DRYRUN/{}"
@@ -89,6 +89,15 @@ def main() -> int:
     if not ex.facts.get("productName"):
         print("FAIL  no facts to write from.")
         return 1
+    print(f"\nMEDIA (dry run: nothing is uploaded): {len(ex.video_candidates)} video(s), "
+          f"{len(ex.image_candidates)} image(s) found")
+    for v in ex.video_candidates[:8]:
+        print(f"  - video {v['url']}  label: \"{v['context'][:80]}\"  ({v['source']})")
+    vp = media.pick_video(ex.video_candidates)
+    print(f"  VIDEO PICK: {vp.url or 'none'}" + (f"  ⚠ CHECK: {vp.check}" if vp.check else "") +
+          (f"  • {vp.note}" if vp.note else ""))
+    pick, note = media.pick_image(ex.image_candidates, ex.facts.get("productName", ""))
+    print(f"  IMAGE PICK: {note}")
     bonuses, method_note, src = sheet_extras()
     f = dict(ex.facts)
     unpriced = [b.get("name") for b in f.get("bundles") or [] if b.get("price") is None]
@@ -101,7 +110,7 @@ def main() -> int:
         oto_links=[PLACEHOLDER.format(f"oto{i + 1}") for i in range(len(f.get("otos") or []))],
         bundle_links=[PLACEHOLDER.format(f"bundle{i + 1}") for i in range(len(f.get("bundles") or []))],
         own_bonuses=bonuses, method_note=method_note, authors=None,
-        author=os.environ.get("DEFAULT_AUTHOR", "marcus").strip() or "marcus")
+        author=os.environ.get("DEFAULT_AUTHOR", "marcus").strip() or "marcus", video_url=vp.url)
     res = write.run(client, inp)
     print(f"\nWRITING: bonuses/method note from {src}; attempts used: {res.attempts} of 3")
     for n in res.notes:

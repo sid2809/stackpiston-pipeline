@@ -128,6 +128,9 @@ class WordPress:
             self._req("POST", f"/media/{media['id']}", json={"alt_text": alt})
         return media
 
+    def get_media(self, media_id: int) -> dict:
+        return self._req("GET", f"/media/{int(media_id)}", params={"context": "edit"})
+
     def delete_review(self, post_id: int) -> None:
         """Only used by the connection check to remove its own test post."""
         self._req("DELETE", f"/reviews/{int(post_id)}", params={"force": "true"})

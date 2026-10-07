@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from . import extract, notify, write
+from . import extract, media, notify, write
 from .llm import LLMError
 from .sheets import ist_now, sheet_datetime
 from .timeparse import to_utc
@@ -107,13 +107,44 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
     if not ex.ok:
         return Result("Needs info", ex.blocking + messages)
 
+    # Phase 6: demo video. The sheet's Video URL always wins; otherwise only a clearly labelled demo is used.
+    video_url = row.text("Video URL")
+    try:
+        if video_url:
+            playable, _ = media.normalize_video(video_url)
+            if playable:
+                video_url = playable
+            elif "wistia" in video_url.lower():
+                messages.append("Video URL is a Wistia share link I couldn't convert, so the player may not show. "
+                                "Use the link from right-click on the video → Copy link and thumbnail.")
+        else:
+            vp = media.pick_video(ex.video_candidates)
+            video_url = vp.url
+            if vp.check:
+                checks.append(f"CHECK: {vp.check}")
+                messages.insert(0, f"CHECK: {vp.check}")
+            if vp.note:
+                messages.append(vp.note)
+    except Exception as e:  # media is optional: never stop a row for it
+        messages.append(f"Video step skipped ({e.__class__.__name__}).")
+
+    # Main image: a Rewrite keeps the image already on the post instead of uploading a copy.
+    featured_id, image_url = None, ""
+    if post_id:
+        try:
+            fm = int((ctx.wp.get_review(post_id) or {}).get("featured_media") or 0)
+            if fm:
+                featured_id, image_url = fm, (ctx.wp.get_media(fm) or {}).get("source_url", "")
+        except Exception:
+            featured_id, image_url = None, ""
+
     facts = dict(ex.facts, productName=name)  # the sheet's product name is the official one
     slug = row.text("Slug") or write.slugify(name)
     method_note = row.text("Method note used") or ctx.take_method_note()
     inp = write.Inputs(
         facts=facts, fe_link=fe, oto_links=oto_links, bundle_links=bundle_links,
         own_bonuses=ctx.bonuses, method_note=method_note, testing_notes=row.text("Testing notes"),
-        days_tested=row.text("Days tested"), video_url=row.text("Video URL"), author=ctx.author,
+        days_tested=row.text("Days tested"), video_url=video_url, image_url=image_url, author=ctx.author,
         authors=None, slug=slug)
     res = write.run(ctx.client, inp)
     messages += res.notes
@@ -122,7 +153,19 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
         return Result(status, res.problems + messages)
 
     review = res.review
-    post = ctx.wp.save_review(review=review, title=f"{name} Review", post_id=post_id, want_status="draft")
+    if not featured_id:
+        try:
+            pick, note = media.pick_image(ex.image_candidates, name)
+            messages.append(note)
+            if pick:
+                up = ctx.wp.upload_media(pick.data, pick.filename, pick.mime, alt=pick.alt)
+                featured_id, image_url = int(up["id"]), up.get("source_url", "")
+                if (review.get("media") or {}).get("type") == "image" and image_url:
+                    review["media"]["imageUrl"] = image_url
+        except Exception as e:  # media is optional: never stop a row for it
+            messages.append(f"Image step skipped ({e.__class__.__name__}: {str(e)[:150]}).")
+    post = ctx.wp.save_review(review=review, title=f"{name} Review", post_id=post_id, want_status="draft",
+                              featured_media=featured_id)
     post_id, saved_slug = post["id"], post.get("slug") or slug
     # Record the post right away: if anything later fails, the next run updates this post instead of making a duplicate.
     ctx.sheet.update(row.number, {"WP post ID": post_id, "Slug": saved_slug})
@@ -143,11 +186,13 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
             messages.append("Kept as draft because the theme reported warnings: " + " | ".join(warnings))
         elif publish_utc and datetime.fromisoformat(publish_utc.replace("Z", "+00:00")) > now_utc:
             post = ctx.wp.save_review(review=review, title=f"{name} Review", post_id=post_id,
-                                      want_status="future", date_gmt=publish_utc.replace("Z", ""))
+                                      want_status="future", date_gmt=publish_utc.replace("Z", ""),
+                                      featured_media=featured_id)
         else:
             if publish_utc:
                 messages.append("Publish at was already in the past, so it was published now.")
-            post = ctx.wp.save_review(review=review, title=f"{name} Review", post_id=post_id, want_status="publish")
+            post = ctx.wp.save_review(review=review, title=f"{name} Review", post_id=post_id, want_status="publish",
+                                      featured_media=featured_id)
     elif warnings:
         messages.append("Theme warnings: " + " | ".join(warnings))
 
