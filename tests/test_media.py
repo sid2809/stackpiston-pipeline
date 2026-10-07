@@ -196,7 +196,7 @@ class MediaWP(FakeWP):
         self.last_review = kw["review"]
         return super().save_review(**kw)
 
-    def upload_media(self, data, filename, mime, alt=""):
+    def upload_media(self, data, filename, mime, alt="", source=""):
         if self.fail_upload:
             raise RuntimeError("HTTP 413 too large")
         self.uploads.append((filename, mime, alt))
@@ -387,3 +387,16 @@ def test_unknown_info_wording_is_flagged():
     inp = write.Inputs(facts=facts_from_sample(), fe_link=SAMPLE["links"]["frontEnd"],
                        oto_links=[o["link"] for o in SAMPLE["pricing"]["otos"]])
     assert any("points out missing information" in p for p in write._check(review, inp))
+
+
+def test_rewrite_with_same_main_image_link_reuses_it(mctx, monkeypatch):
+    make, state = mctx
+    monkeypatch.setattr(media, "fetch_image", fake_fetch_image)
+
+    class SameSource(MediaWP):
+        def get_media(self, mid):
+            return {"id": mid, "source_url": "https://s.test/u/old.png", "description": {"raw": "Source: https://v.test/same.png"}}
+    wp = SameSource(featured=55, gallery=[{"url": "https://s.test/u/g.png", "alt": "g"}])
+    c = make([make_row(**{"WP post ID": 9, "Rewrite": True, "Main image URL": "https://v.test/same.png"})], wp=wp)
+    runner.poll(c, now_utc=NOW)
+    assert wp.uploads == [] and wp.calls_fm == [55]

@@ -14,6 +14,8 @@ def send(subject: str, body: str) -> str:
     """Returns '' on success or when email isn't set up; otherwise a short error (never raises)."""
     if not configured():
         return ""
+    from .safety import scrub
+    subject, body = scrub(subject), scrub(body)
     msg = EmailMessage()
     msg["From"] = os.environ["SMTP_USER"].strip()
     msg["To"] = os.environ["NOTIFY_EMAIL"].strip()

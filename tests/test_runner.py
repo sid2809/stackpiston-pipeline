@@ -52,6 +52,9 @@ class FakeWP:
     def warnings(post):
         return post.get("sp_warnings") or []
 
+    def get_review(self, post_id):
+        return {"id": post_id, "status": "draft", "featured_media": 0, "meta": {}}
+
 
 def make_row(n=2, **over):
     s = SAMPLE
@@ -129,12 +132,6 @@ def test_missing_required_fields_need_info_without_ai(ctx):
     runner.poll(c, now_utc=NOW)
     out = c.sheet.final(2)
     assert out["Status"] == "Needs info" and "FE affiliate link" in out["Messages"] and not c.wp.calls
-
-
-def test_existing_post_needs_rewrite_tick(ctx):
-    c = ctx([make_row(**{"WP post ID": 55})], replies=[])
-    runner.poll(c, now_utc=NOW)
-    assert c.sheet.final(2)["Status"] == "Needs info" and "Tick Rewrite" in c.sheet.final(2)["Messages"]
 
 
 def test_rewrite_updates_same_post_and_unticks(ctx):

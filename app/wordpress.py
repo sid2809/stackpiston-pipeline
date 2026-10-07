@@ -120,12 +120,15 @@ class WordPress:
             body["date_gmt"] = date_gmt
         return self._req("POST", "/reviews", json=body)
 
-    def upload_media(self, data: bytes, filename: str, mime: str, alt: str = "") -> dict:
+    def upload_media(self, data: bytes, filename: str, mime: str, alt: str = "", source: str = "") -> dict:
+        """source: the link the image came from, kept in the image's description so a patch can tell
+        whether the sheet's Main image URL changed."""
         safe = re.sub(r"[^A-Za-z0-9._-]+", "-", filename).strip("-") or "image"
         media = self._req("POST", "/media", data=data, headers={
             "Content-Type": mime, "Content-Disposition": f'attachment; filename="{safe}"'})
-        if alt:
-            self._req("POST", f"/media/{media['id']}", json={"alt_text": alt})
+        extra = {k: v for k, v in (("alt_text", alt), ("description", f"Source: {source}" if source else "")) if v}
+        if extra:
+            self._req("POST", f"/media/{media['id']}", json=extra)
         return media
 
     def get_media(self, media_id: int) -> dict:

@@ -11,8 +11,9 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from . import extract, media, notify, write
+from . import extract, media, notify, patch, write
 from .llm import LLMError
+from .safety import scrub
 from .sheets import ist_now, sheet_datetime
 from .timeparse import to_utc
 from .wordpress import WordPress, WPError
@@ -78,9 +79,6 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
         except ValueError:
             return Result("Needs info", ["WP post ID isn't a number. Clear it or fix it."])
     rewrite = row.checked("Rewrite")
-    if post_id and not rewrite:
-        return Result("Needs info", [f"This launch already has a post (#{post_id}). Tick Rewrite to regenerate it "
-                                     "(updates that keep your manual edits come in Phase 7)."])
 
     tz = row.text("Timezone") or "America/New_York"
     open_utc, p1 = _local_to_utc(row.get("Cart open"), tz, "Cart open")
@@ -98,6 +96,22 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
                        "Put one full link per line (labels like 'OTO 1:' are fine).")
     if bad:
         return Result("Needs info", bad)
+    if post_id and not rewrite:
+        # Existing post without Rewrite: patch from the sheet only (no AI, $0), keeping manual edits.
+        return patch.patch_row(row, ctx, post_id=post_id, name=name, fe=fe, oto_links=oto_links,
+                               bundle_links=bundle_links, open_utc=open_utc, close_utc=close_utc,
+                               publish_utc=publish_utc, now_utc=now_utc)
+    current = {}
+    if post_id:  # Rewrite: make sure the post exists and isn't trashed BEFORE spending anything on AI
+        try:
+            current = ctx.wp.get_review(post_id) or {}
+        except WPError as e:
+            return Result("Needs info", [f"Post #{post_id} couldn't be read from WordPress ({e}). If it was deleted, "
+                                         "clear WP post ID (and Slug) to create a new review. No AI was used."])
+        if current.get("status") not in patch.EDITABLE:
+            return Result("Needs info", [f"Post #{post_id} is '{current.get('status')}' in WordPress (for example in "
+                                         "the trash), so it wasn't rewritten. Restore it in wp-admin, or clear WP post "
+                                         "ID and Slug to create a new review. No AI was used."])
     ex = extract.run(ctx.client, jv_urls, row.text("Sales page URL") or None,
                      cart_open_override_utc=open_utc, cart_close_override_utc=close_utc,
                      owner_notes=row.text("Notes for AI") or None,
@@ -129,16 +143,17 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
         messages.append(f"Video step skipped ({e.__class__.__name__}).")
 
     # Main image and screenshots: a Rewrite keeps the ones already on the post instead of uploading copies.
-    featured_id, image_url, gallery = None, "", []
+    featured_id, image_url, gallery, image_source = None, "", [], ""
     if post_id:
         try:
-            current = ctx.wp.get_review(post_id) or {}
             fm = int(current.get("featured_media") or 0)
             if fm:
-                featured_id, image_url = fm, (ctx.wp.get_media(fm) or {}).get("source_url", "")
+                m = ctx.wp.get_media(fm) or {}
+                featured_id, image_url = fm, m.get("source_url", "")
+                image_source = ((m.get("description") or {}).get("raw") or "").strip()
             gallery = list((WordPress.review_json(current) or {}).get("gallery") or [])
         except Exception:
-            featured_id, image_url, gallery = None, "", []
+            featured_id, image_url, gallery, image_source = None, "", [], ""
 
     facts = dict(ex.facts, productName=name)  # the sheet's product name is the official one
     slug = row.text("Slug") or write.slugify(name)
@@ -157,12 +172,14 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
     review = res.review
     # Main image: only from the sheet's Main image URL (a Rewrite without a link keeps the current one).
     main_url = row.text("Main image URL")
-    if main_url:
+    if main_url and featured_id and image_source == f"Source: {main_url}":
+        pass  # same link as the image already on the post: reuse it, no duplicate upload
+    elif main_url:
         try:
             main, note = media.fetch_image(main_url, name)
             messages.append(note)
             if main:
-                up = ctx.wp.upload_media(main.data, main.filename, main.mime, alt=main.alt)
+                up = ctx.wp.upload_media(main.data, main.filename, main.mime, alt=main.alt, source=main_url)
                 featured_id, image_url = int(up["id"]), up.get("source_url", "")
         except Exception as e:  # media is optional: never stop a row for it
             messages.append(f"Main image skipped ({e.__class__.__name__}: {str(e)[:150]}).")
@@ -187,12 +204,24 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
             messages.append(f"Image step skipped ({e.__class__.__name__}: {str(e)[:150]}).")
     if gallery:
         review["gallery"] = gallery[:media.GALLERY_MAX]
+    updates = {"Method note used": method_note}
+    if rewrite:
+        updates["Rewrite"] = False
+    return save_and_finish(row, ctx, review=review, name=name, post_id=post_id, slug=slug, messages=messages,
+                           checks=checks, publish_utc=publish_utc, featured_id=featured_id, now_utc=now_utc,
+                           extra_updates=updates)
+
+
+def save_and_finish(row, ctx: Context, *, review: dict, name: str, post_id, slug: str, messages: list,
+                    checks: list, publish_utc, featured_id, now_utc: datetime, extra_updates: dict) -> Result:
+    """Save as draft, record the post in the sheet, then publish/schedule if Mode = Publish allows it.
+    Shared by new reviews, rewrites and patches, so all follow the same publishing rules."""
     post = ctx.wp.save_review(review=review, title=f"{name} Review", post_id=post_id, want_status="draft",
                               featured_media=featured_id)
     post_id, saved_slug = post["id"], post.get("slug") or slug
     # Record the post right away: if anything later fails, the next run updates this post instead of making a duplicate.
     ctx.sheet.update(row.number, {"WP post ID": post_id, "Slug": saved_slug})
-    if saved_slug != slug:
+    if slug and saved_slug != slug:
         messages.append(f"WordPress saved the address as '{saved_slug}' because '{slug}' was taken.")
     warnings = ctx.wp.warnings(post)
 
@@ -223,10 +252,7 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
     status = STATUS_FROM_WP.get(wp_status, "Draft ready")
     preview = (f"{ctx.base_url}/?post_type=review&p={post_id}&preview=true" if status == "Draft ready"
                else post.get("link", ""))
-    updates = {"WP post ID": post_id, "Slug": saved_slug, "Preview link": preview,
-               "Method note used": method_note}
-    if rewrite:
-        updates["Rewrite"] = False
+    updates = dict(extra_updates, **{"WP post ID": post_id, "Slug": saved_slug, "Preview link": preview})
     return Result(status, messages, updates)
 
 
@@ -261,7 +287,7 @@ def poll(ctx: Context, only_row: int | None = None, now_utc: datetime | None = N
             result = Result("Error", [str(e)])
         except Exception as e:  # keep going with the next row; the message never includes secrets
             result = Result("Error", [f"Unexpected problem: {e.__class__.__name__}: {str(e)[:300]}"])
-        msg_text = " | ".join(result.messages)
+        msg_text = scrub(" | ".join(result.messages))
         ctx.sheet.update(r.number, dict(result.updates, Status=result.status, Messages=msg_text, **{"Last run": ist_now()}))
         ctx.sheet.log([ist_now(), r.number, result.updates.get("Slug", r.text("Slug")), "run", result.status, msg_text])
         err = notify.send(f"[StackPiston] {r.text('Product name') or 'Row ' + str(r.number)}: {result.status}",
@@ -272,11 +298,11 @@ def poll(ctx: Context, only_row: int | None = None, now_utc: datetime | None = N
     return counts
 
 
-def build_context() -> Context:
+def build_context(need_ai: bool = True) -> Context:
     from .config import SheetConfig, WPConfig
     from .llm import get_client
     from .sheets import SheetIO, open_sheet
-    from .wordpress import WordPress
     wp_cfg = WPConfig.from_env()
-    return Context(client=get_client(), wp=WordPress(wp_cfg), sheet=SheetIO(open_sheet(SheetConfig.from_env())),
+    return Context(client=get_client() if need_ai else None, wp=WordPress(wp_cfg),
+                   sheet=SheetIO(open_sheet(SheetConfig.from_env())),
                    base_url=wp_cfg.base_url, author=os.environ.get("DEFAULT_AUTHOR", "marcus").strip() or "marcus")
