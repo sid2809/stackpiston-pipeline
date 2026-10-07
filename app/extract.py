@@ -113,6 +113,10 @@ def apply_notes(client, facts: dict, notes: str) -> tuple[dict, int, int]:
     return out, r.input_tokens, r.output_tokens
 
 
+# Lists where the AI may deliberately drop items another source has (leftovers, webinar gifts...).
+STICKY_DECISIONS = {"affiliateBonuses", "vendorBonuses", "otos", "bundles", "coupons"}
+
+
 def reconcile(client, labelled: list[tuple[str, dict]], disagreements: list[str], today: str,
               hints: dict | None = None) -> tuple[dict, list[str], int, int]:
     """The AI picks the best value for each disagreement and says why. Launch info is kept from the base source."""
@@ -124,9 +128,10 @@ def reconcile(client, labelled: list[tuple[str, dict]], disagreements: list[str]
     reply = r.data if isinstance(r.data, dict) else {}
     base = labelled[0][1]
     chosen = reply.get("facts") if isinstance(reply.get("facts"), dict) else {}
-    facts = clean_facts({**base, **{k: v for k, v in chosen.items() if k in base}})
+    picked = {k: v for k, v in chosen.items() if k in base}
+    facts = clean_facts({**base, **picked})
     decisions = [str(d) for d in reply.get("decisions") or [] if str(d).strip()]
-    return facts, decisions, r.input_tokens, r.output_tokens
+    return facts, decisions, r.input_tokens, r.output_tokens, set(picked)
 
 
 # ------------------------------------------------------------------ comparing
@@ -379,10 +384,14 @@ def run(client, main_urls, sales_url: str | None = None,
     facts = merge(base, others)
     if disagreements:
         try:
-            decided, decisions, ti, to = reconcile(client, labelled, disagreements, today, hints)
+            decided, decisions, ti, to, decided_keys = reconcile(client, labelled, disagreements, today, hints)
             res.input_tokens += ti
             res.output_tokens += to
             facts = merge(decided, others)
+            # Keep what the AI decided: merging must not re-add items it removed on purpose
+            # (e.g. webinar gifts it ruled out as bonuses, or a leftover OTO from another product).
+            for k in decided_keys & STICKY_DECISIONS:
+                facts[k] = copy.deepcopy(decided[k])
             res.warnings += decisions or [f"Sources disagreed ({len(disagreements)} points); the AI chose without explaining."]
         except LLMError as e:
             res.warnings += disagreements

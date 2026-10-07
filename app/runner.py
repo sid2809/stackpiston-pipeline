@@ -15,7 +15,7 @@ from . import extract, media, notify, write
 from .llm import LLMError
 from .sheets import ist_now, sheet_datetime
 from .timeparse import to_utc
-from .wordpress import WPError
+from .wordpress import WordPress, WPError
 
 STUCK_AFTER = timedelta(minutes=30)
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -128,15 +128,17 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
     except Exception as e:  # media is optional: never stop a row for it
         messages.append(f"Video step skipped ({e.__class__.__name__}).")
 
-    # Main image: a Rewrite keeps the image already on the post instead of uploading a copy.
-    featured_id, image_url = None, ""
+    # Main image and screenshots: a Rewrite keeps the ones already on the post instead of uploading copies.
+    featured_id, image_url, gallery = None, "", []
     if post_id:
         try:
-            fm = int((ctx.wp.get_review(post_id) or {}).get("featured_media") or 0)
+            current = ctx.wp.get_review(post_id) or {}
+            fm = int(current.get("featured_media") or 0)
             if fm:
                 featured_id, image_url = fm, (ctx.wp.get_media(fm) or {}).get("source_url", "")
+            gallery = list((WordPress.review_json(current) or {}).get("gallery") or [])
         except Exception:
-            featured_id, image_url = None, ""
+            featured_id, image_url, gallery = None, "", []
 
     facts = dict(ex.facts, productName=name)  # the sheet's product name is the official one
     slug = row.text("Slug") or write.slugify(name)
@@ -153,17 +155,38 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
         return Result(status, res.problems + messages)
 
     review = res.review
-    if not featured_id:
+    # Main image: only from the sheet's Main image URL (a Rewrite without a link keeps the current one).
+    main_url = row.text("Main image URL")
+    if main_url:
         try:
-            pick, note = media.pick_image(ex.image_candidates, name)
+            main, note = media.fetch_image(main_url, name)
             messages.append(note)
-            if pick:
-                up = ctx.wp.upload_media(pick.data, pick.filename, pick.mime, alt=pick.alt)
+            if main:
+                up = ctx.wp.upload_media(main.data, main.filename, main.mime, alt=main.alt)
                 featured_id, image_url = int(up["id"]), up.get("source_url", "")
-                if (review.get("media") or {}).get("type") == "image" and image_url:
-                    review["media"]["imageUrl"] = image_url
+        except Exception as e:  # media is optional: never stop a row for it
+            messages.append(f"Main image skipped ({e.__class__.__name__}: {str(e)[:150]}).")
+    elif not featured_id:
+        messages.append("Main image URL is empty, so the review has no main image (or share image).")
+    if image_url and (review.get("media") or {}).get("type") == "image":
+        review["media"]["imageUrl"] = image_url
+    # Screenshots for "Inside the product": picked automatically from the sources.
+    if not gallery:
+        try:
+            cands = [c for c in ex.image_candidates if c.get("url") != main_url]
+            _, shots, notes = media.pick_all(cands, name, want_main=False)
+            messages += notes
+            for shot in shots:
+                try:
+                    up = ctx.wp.upload_media(shot.data, shot.filename, shot.mime, alt=shot.alt)
+                    if up.get("source_url"):
+                        gallery.append({"url": up["source_url"], "alt": shot.alt})
+                except Exception as e:
+                    messages.append(f"A screenshot upload was skipped ({e.__class__.__name__}).")
         except Exception as e:  # media is optional: never stop a row for it
             messages.append(f"Image step skipped ({e.__class__.__name__}: {str(e)[:150]}).")
+    if gallery:
+        review["gallery"] = gallery[:media.GALLERY_MAX]
     post = ctx.wp.save_review(review=review, title=f"{name} Review", post_id=post_id, want_status="draft",
                               featured_media=featured_id)
     post_id, saved_slug = post["id"], post.get("slug") or slug

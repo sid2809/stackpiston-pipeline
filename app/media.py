@@ -27,6 +27,7 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_IMAGE_TRIES = 12
 MAX_TITLE_LOOKUPS = 6
+GALLERY_MAX = 4
 
 VIDEO_GOOD = re.compile(r"(?<![a-z])(demo|walk-?through|training|tutorial|sneak[\s-]*peek|inside[\s-]look|"
                         r"see it in action|how it works|product video|overview video)(?![a-z])", re.I)
@@ -243,25 +244,28 @@ def _name_tokens(product: str) -> list[str]:
     return [t for t in re.findall(r"[a-z0-9]+", (product or "").lower()) if len(t) >= 3 and t not in ("the", "and", "pro")]
 
 
-def pick_image(candidates: list[dict], product: str, s: requests.Session | None = None) -> tuple[ImagePick | None, str]:
-    """candidates: [{"url", "alt", "source", "sales": bool}]. Returns (pick or None, note)."""
+def rank_images(candidates: list[dict], product: str, s: requests.Session | None = None,
+                max_tries: int = MAX_IMAGE_TRIES) -> tuple[list[ImagePick], int]:
+    """All usable product images, best first, plus how many were downloaded to check."""
     s = s or _session()
     ordered = sorted(candidates, key=lambda c: 0 if c.get("sales") else 1)
     tokens = _name_tokens(product)
-    tried, best, best_score = 0, None, -1.0
+    slug = re.sub(r"[^a-z0-9]+", "-", (product or "review").lower()).strip("-") or "review"
+    tried, scored, seen_data = 0, [], set()
     for c in ordered:
         u, alt = c.get("url", ""), c.get("alt", "")
         path = urlparse(u).path.lower()
         label = f"{path} {alt}".lower()
         if not u.startswith(("http://", "https://")) or IMAGE_SKIP.search(label) or path.endswith((".svg", ".gif", ".ico")):
             continue
-        if tried >= MAX_IMAGE_TRIES:
+        if tried >= max_tries:
             break
         tried += 1
         data = _download(u, s)
         info = image_size(data) if data else None
-        if not info:
+        if not info or hash(data) in seen_data:
             continue
+        seen_data.add(hash(data))
         mime, w, h = info
         if w < 600 or h < 300 or not (1.2 <= w / h <= 2.4):
             continue
@@ -269,15 +273,77 @@ def pick_image(candidates: list[dict], product: str, s: requests.Session | None 
         score += 1.0 if c.get("sales") else 0
         score += 0.6 if IMAGE_GOOD.search(label) else 0
         score += 0.6 if any(t in label.replace("-", "").replace("_", "") for t in tokens) else 0
-        if score > best_score:
-            ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[mime]
-            slug = re.sub(r"[^a-z0-9]+", "-", (product or "review").lower()).strip("-") or "review"
-            best_score = score
-            best = ImagePick(data=data, mime=mime, filename=f"{slug}-review.{ext}", width=w, height=h,
-                             source=u, alt=f"{product} screenshot"[:120])
-    if best:
+        ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[mime]
+        scored.append((score, len(scored), ImagePick(data=data, mime=mime, filename=f"{slug}-review.{ext}", width=w,
+                                                      height=h, source=u, alt=f"{product} screenshot"[:120])))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [p for _, _, p in scored], tried
+
+
+def pick_image(candidates: list[dict], product: str, s: requests.Session | None = None) -> tuple[ImagePick | None, str]:
+    """candidates: [{"url", "alt", "source", "sales": bool}]. Returns (pick or None, note)."""
+    ranked, tried = rank_images(candidates, product, s)
+    if ranked:
+        best = ranked[0]
         return best, f"Main image picked automatically from {best.source} ({best.width}×{best.height})."
     if not candidates:
         return None, "No images found in the sources, so the review has no main image. Add one in wp-admin if needed."
     return None, (f"Checked {tried} image(s) but none looked like a main product image (landscape, at least 600×300). "
                   "Add one in wp-admin (Featured image) if needed.")
+
+
+def pick_all(candidates: list[dict], product: str, s: requests.Session | None = None,
+             want_main: bool = True, want_gallery: bool = True) -> tuple[ImagePick | None, list[ImagePick], list[str]]:
+    """One download pass for both the main image and the screenshot gallery."""
+    if not candidates:
+        notes = []
+        if want_main:
+            notes.append("No images found in the sources, so the review has no main image. Add one in wp-admin if needed.")
+        return None, [], notes
+    ranked, tried = rank_images(candidates, product, s, max_tries=MAX_IMAGE_TRIES + GALLERY_MAX * 2)
+    notes, main = [], None
+    if want_main:
+        if ranked:
+            main = ranked[0]
+            notes.append(f"Main image picked automatically from {main.source} ({main.width}×{main.height}).")
+        else:
+            notes.append(f"Checked {tried} image(s) but none looked like a main product image (landscape, at least "
+                         "600×300). Add one in wp-admin (Featured image) if needed.")
+    gallery: list[ImagePick] = []
+    if want_gallery:
+        rest = ranked[1:] if want_main else ranked
+        slug = re.sub(r"[^a-z0-9]+", "-", (product or "review").lower()).strip("-") or "review"
+        for i, p in enumerate(rest[:GALLERY_MAX], 1):
+            p.filename = f"{slug}-screenshot-{i}.{p.filename.rsplit('.', 1)[-1]}"
+            p.alt = f"{product} screenshot {i}"[:120]
+            gallery.append(p)
+        notes.append(f"{len(gallery)} screenshot(s) added to the \"Inside the product\" section." if gallery else
+                     "No extra screenshots found, so the \"Inside the product\" section is hidden.")
+    return main, gallery, notes
+
+
+def _direct_image_url(u: str) -> str:
+    """Google Drive share links -> direct download link; anything else unchanged."""
+    m = re.search(r"drive\.google\.com/(?:file/d/|open\?id=|uc\?(?:export=\w+&)?id=)([A-Za-z0-9_-]{20,})", u)
+    return f"https://drive.google.com/uc?export=download&id={m.group(1)}" if m else u
+
+
+def fetch_image(url: str, product: str, s: requests.Session | None = None) -> tuple[ImagePick | None, str]:
+    """The main image from the sheet's Main image URL column."""
+    url = (url or "").strip()
+    if not url.startswith(("http://", "https://")):
+        return None, "Main image URL must start with https://. The review has no main image this time."
+    s = s or _session()
+    data = _download(_direct_image_url(url), s)
+    info = image_size(data) if data else None
+    if not info:
+        return None, ("Main image URL didn't return a JPG, PNG or WebP image (it may be a web page, need a login, or be "
+                      "over 8 MB). Use a link that opens only the image. The review has no main image this time.")
+    mime, w, h = info
+    ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[mime]
+    slug = re.sub(r"[^a-z0-9]+", "-", (product or "review").lower()).strip("-") or "review"
+    note = f"Main image taken from the sheet ({w}×{h})."
+    if w < 600:
+        note += " It's quite small (under 600 px wide), so it may look blurry in link previews."
+    return ImagePick(data=data, mime=mime, filename=f"{slug}-review.{ext}", width=w, height=h, source=url,
+                     alt=f"{product} screenshot"[:120]), note

@@ -8,7 +8,8 @@ Output rules
 - "otos" must have exactly the same count and order as FACTS.otos (position 1 first). Same for "bundles" (FACTS.bundles), "vendorBonuses" (FACTS.vendorBonuses) and "packBonuses" (FACTS.affiliateBonuses, up to the count in COUNTS).
 - packBonuses are bonuses StackPiston gives as its own (from the vendor's affiliate pack). Rewrite each title and description clearly, with no income or results claims (no dollar earnings, view counts or lead counts).
 - Never write URLs.
-- Never claim something is absent just because FACTS doesn't mention it (e.g. never write "the vendor has no bonuses" or "there is no refund"). Say it isn't stated, or leave it out.
+- Never claim something is absent just because FACTS doesn't mention it (e.g. never write "the vendor has no bonuses" or "there is no refund"). Leave it out.
+- Never point out missing information: no "isn't stated", "not stated", "unstated", "not listed", "not specified", "not disclosed", "unknown", "unclear" about the offer (prices, price types, refund terms, post-launch price, client terms...). If FACTS doesn't have it, don't mention that topic at all, and don't write an FAQ question whose answer would be "we don't know".
 - Testing: describe specific test results (timings, counts, outcomes) only if TESTING NOTES contain them. Otherwise describe what the product does, based on FACTS, without claiming measured results.
 - Never say whether the product was or wasn't tested (no "not tested by us", no "in our tests"). The page shows testing status separately.
 

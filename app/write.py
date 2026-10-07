@@ -72,6 +72,15 @@ def slugify(name: str) -> str:
     return s or "review"
 
 
+def _fit_words(text: str, limit: int) -> str:
+    """Shorten to the limit on a word boundary, never mid-word ("Mahmoud Al-Sh")."""
+    text = " ".join(str(text).split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit + 1].rsplit(" ", 1)[0].rstrip(" ,&-")
+    return cut or text[:limit]
+
+
 def _money(v) -> str:
     f = float(v)
     return f"{f:.2f}".rstrip("0").rstrip(".")
@@ -145,7 +154,7 @@ def assemble(copy_: dict, inp: Inputs, today: str | None = None) -> tuple[dict, 
         "schemaVersion": 1,
         "slug": inp.slug or slugify(product_name),
         "seo": {"title": c.get("seoTitle", ""), "description": c.get("seoDescription", "")},
-        "product": {"name": product_name, "vendor": (f.get("vendor") or "")[:32], "niche": c.get("niche", ""),
+        "product": {"name": product_name, "vendor": _fit_words(f.get("vendor") or "", 60), "niche": c.get("niche", ""),
                     "summary": c.get("summary", ""), "platform": f.get("platform") or "JVZoo"},
         "launch": {"cartOpen": cart_open or "", "cartClose": cart_close or "",
                    "timeZone": "America/New_York", "timezoneLabel": tz_label},
@@ -357,6 +366,12 @@ def _check(review: dict, inp: Inputs) -> list[str]:
     for path, text in _strings(review):
         if absent_re.search(text):
             probs.append(f"{path} claims there are no bonuses (\"{text[:60]}\"). Don't state that; leave it out.")
+    unknown_re = re.compile(r"\b(isn't|is not|aren't|are not|wasn't|not)\s+(clearly\s+)?(stated|listed|specified|disclosed|mentioned)\b"
+                            r"|\bunstated\b|\bunspecified\b", re.I)
+    for path, text in _strings(review):
+        if unknown_re.search(text):
+            probs.append(f"{path} points out missing information (\"{text[:60]}\"). Remove that sentence or item; "
+                         "if it was a FAQ about something unknown, replace it with a different question.")
     rev_otos = (review.get("pricing") or {}).get("otos") or []
     for i, of in enumerate(inp.facts.get("otos") or []):
         if not of.get("items") and not of.get("description") and i < len(rev_otos) \

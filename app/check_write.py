@@ -96,8 +96,12 @@ def main() -> int:
     vp = media.pick_video(ex.video_candidates)
     print(f"  VIDEO PICK: {vp.url or 'none'}" + (f"  ⚠ CHECK: {vp.check}" if vp.check else "") +
           (f"  • {vp.note}" if vp.note else ""))
-    pick, note = media.pick_image(ex.image_candidates, ex.facts.get("productName", ""))
-    print(f"  IMAGE PICK: {note}")
+    print("  MAIN IMAGE: taken from the sheet's Main image URL column in real runs (not picked automatically).")
+    _, shots, img_notes = media.pick_all(ex.image_candidates, ex.facts.get("productName", ""), want_main=False)
+    for n in img_notes:
+        print(f"  IMAGE PICK: {n}")
+    for sh in shots:
+        print(f"    screenshot: {sh.source} ({sh.width}×{sh.height})")
     bonuses, method_note, src = sheet_extras()
     f = dict(ex.facts)
     unpriced = [b.get("name") for b in f.get("bundles") or [] if b.get("price") is None]

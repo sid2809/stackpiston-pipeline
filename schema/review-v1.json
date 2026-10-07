@@ -61,7 +61,7 @@
         "vendor": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 32
+          "maxLength": 60
         },
         "niche": {
           "type": "string",
@@ -624,6 +624,26 @@
           "value": {
             "type": "number",
             "minimum": 0
+          }
+        }
+      }
+    },
+    "gallery": {
+      "type": "array",
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "pattern": "^https?://"
+          },
+          "alt": {
+            "type": "string",
+            "maxLength": 120
           }
         }
       }

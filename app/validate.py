@@ -175,7 +175,7 @@ def theme_warnings(d, authors: set[str] | None = None) -> list[str]:
     _v_str(w, "seo.description", _get(d, "seo.description"), 0, 155, True)
 
     _v_str(w, "product.name", _get(d, "product.name"), 0, 28, True)
-    _v_str(w, "product.vendor", _get(d, "product.vendor"), 0, 32, True)
+    _v_str(w, "product.vendor", _get(d, "product.vendor"), 0, 60, True)
     _v_str(w, "product.niche", _get(d, "product.niche"), 0, 24, True)
     _v_str(w, "product.summary", _get(d, "product.summary"), 200, 400, True)
     _v_num(w, "product.refundDays", _get(d, "product.refundDays"), 0, 365)
@@ -310,6 +310,15 @@ def theme_warnings(d, authors: set[str] | None = None) -> list[str]:
             _v_str(w, f"{L} title", x.get("title"), 0, 40, True)
             _v_str(w, f"{L} description", x.get("description"), 0, 140)
             _v_num(w, f"{L} value", x.get("value"), 0)
+
+    g = _get(d, "gallery")
+    if _v_list(w, "gallery", g, 0, 6):
+        for i, x in enumerate(g):
+            x = x if isinstance(x, dict) else {}
+            _v_str(w, f"gallery #{i + 1} url", x.get("url"), 0, 0, True)
+            if isinstance(x.get("url"), str) and x["url"] and not x["url"].startswith(("http://", "https://")):
+                w.append(f"gallery #{i + 1} url should start with http:// or https://.")
+            _v_str(w, f"gallery #{i + 1} alt", x.get("alt"), 0, 120)
 
     q = _get(d, "faq")
     if _v_list(w, "faq", q, 4, 8):

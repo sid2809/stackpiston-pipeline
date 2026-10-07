@@ -1,4 +1,5 @@
 """Phase 6: demo video and main image picking. All network replies are simulated."""
+import json
 import struct
 
 import pytest
@@ -186,9 +187,9 @@ def test_media_parts_reads_labels_and_unwraps_google_links():
 # ------------------------------------------------------------------ runner
 
 class MediaWP(FakeWP):
-    def __init__(self, featured=0, fail_upload=False):
+    def __init__(self, featured=0, fail_upload=False, gallery=None):
         super().__init__()
-        self.uploads, self.featured, self.fail_upload = [], featured, fail_upload
+        self.uploads, self.featured, self.fail_upload, self.gallery = [], featured, fail_upload, gallery or []
 
     def save_review(self, **kw):
         self.calls_fm = getattr(self, "calls_fm", []) + [kw.get("featured_media")]
@@ -202,7 +203,8 @@ class MediaWP(FakeWP):
         return {"id": 777, "source_url": "https://s.test/wp-content/uploads/" + filename}
 
     def get_review(self, post_id):
-        return {"id": post_id, "featured_media": self.featured, "status": "draft"}
+        meta = {"sp_review_json": json.dumps({"gallery": self.gallery})} if self.gallery else {}
+        return {"id": post_id, "featured_media": self.featured, "status": "draft", "meta": meta}
 
     def get_media(self, mid):
         return {"id": mid, "source_url": "https://s.test/wp-content/uploads/old.png"}
@@ -223,11 +225,12 @@ def mctx(monkeypatch):
     return make, state
 
 
-def fake_pick_image(cands, product, s=None):
-    if not cands:
-        return None, "No images found in the sources."
-    return media.ImagePick(png(1200, 630), "image/png", "clipforge-ai-review.png", 1200, 630, cands[0]["url"], "x"), \
-        "Main image picked automatically."
+def fake_pick_all(cands, product, s=None, want_main=True, want_gallery=True):
+    main = media.ImagePick(png(1200, 630), "image/png", "clipforge-ai-review.png", 1200, 630, "https://v.test/hero.png", "x") \
+        if (cands and want_main) else None
+    shots = [media.ImagePick(png(1200, 700), "image/png", f"clipforge-ai-screenshot-{i}.png", 1200, 700,
+                             f"https://v.test/s{i}.png", f"shot {i}") for i in (1, 2)] if (cands and want_gallery) else []
+    return main, shots, ["fake note"]
 
 
 def test_runner_auto_demo_video_is_a_check_and_blocks_auto_publish(mctx, monkeypatch):
@@ -242,37 +245,78 @@ def test_runner_auto_demo_video_is_a_check_and_blocks_auto_publish(mctx, monkeyp
                                          "videoUrl": "https://www.youtube.com/watch?v=BBBBBBBBBBB"}
 
 
-def test_runner_uploads_image_and_sets_featured_media(mctx, monkeypatch):
+def fake_fetch_image(url, product, s=None):
+    return media.ImagePick(png(1200, 630), "image/png", "clipforge-ai-review.png", 1200, 630, url, "x"), "Main image taken from the sheet."
+
+
+def test_runner_main_image_from_sheet_and_auto_screenshots(mctx, monkeypatch):
     make, state = mctx
-    monkeypatch.setattr(media, "pick_image", fake_pick_image)
-    state["images"] = [{"url": "https://v.test/hero.png", "alt": "", "source": "the sales page", "sales": True}]
+    monkeypatch.setattr(media, "fetch_image", fake_fetch_image)
+    seen = {}
+
+    def spy_pick_all(cands, product, s=None, want_main=True, want_gallery=True):
+        seen["want_main"], seen["urls"] = want_main, [c["url"] for c in cands]
+        return fake_pick_all(cands, product, s, want_main, want_gallery)
+    monkeypatch.setattr(media, "pick_all", spy_pick_all)
+    state["images"] = [{"url": "https://v.test/mine.png", "alt": "", "source": "s", "sales": True},
+                       {"url": "https://v.test/other.png", "alt": "", "source": "s", "sales": True}]
+    c = make([make_row(**{"Main image URL": "https://v.test/mine.png"})])
+    runner.poll(c, now_utc=NOW)
+    assert c.wp.uploads[0] == ("clipforge-ai-review.png", "image/png", "x") and c.wp.calls_fm == [777]
+    assert seen == {"want_main": False, "urls": ["https://v.test/other.png"]}  # never auto-picks the main image
+    assert [u[0] for u in c.wp.uploads[1:]] == ["clipforge-ai-screenshot-1.png", "clipforge-ai-screenshot-2.png"]
+    assert len(c.wp.last_review["gallery"]) == 2 and c.sheet.final(2)["Status"] == "Draft ready"
+
+
+def test_runner_blank_main_image_means_none_and_a_note(mctx, monkeypatch):
+    make, state = mctx
+    monkeypatch.setattr(media, "pick_all", fake_pick_all)
+    state["images"] = [{"url": "https://v.test/x.png", "alt": "", "source": "s", "sales": True}]
     c = make([make_row()])
     runner.poll(c, now_utc=NOW)
-    assert c.wp.uploads == [("clipforge-ai-review.png", "image/png", "x")] and c.wp.calls_fm == [777]
-    assert c.wp.last_review["media"]["type"] == "image"
-    assert c.wp.last_review["media"]["imageUrl"] == "https://s.test/wp-content/uploads/clipforge-ai-review.png"
-    assert c.sheet.final(2)["Status"] == "Draft ready"
+    assert c.wp.calls_fm == [None] and "Main image URL is empty" in c.sheet.final(2)["Messages"]
+    assert all("review." not in u[0] for u in c.wp.uploads)  # only screenshots uploaded
 
 
 def test_runner_rewrite_reuses_existing_image(mctx, monkeypatch):
     make, state = mctx
-    monkeypatch.setattr(media, "pick_image", fake_pick_image)
+    monkeypatch.setattr(media, "pick_all", fake_pick_all)
     state["images"] = [{"url": "https://v.test/hero.png", "alt": "", "source": "s", "sales": True}]
-    wp = MediaWP(featured=55)
+    old_gallery = [{"url": "https://s.test/wp-content/uploads/old-shot.png", "alt": "old"}]
+    wp = MediaWP(featured=55, gallery=old_gallery)
     c = make([make_row(**{"WP post ID": 9, "Rewrite": True})], wp=wp)
     runner.poll(c, now_utc=NOW)
-    assert wp.uploads == [] and wp.calls_fm == [55]
-    assert wp.last_review["media"]["imageUrl"] == "https://s.test/wp-content/uploads/old.png"
+    assert wp.uploads == [] and wp.calls_fm == [55] and wp.last_review["gallery"] == old_gallery
+    assert "Main image URL is empty" not in c.sheet.final(2)["Messages"]
+
+
+def test_runner_rewrite_with_new_main_image_link_replaces_it(mctx, monkeypatch):
+    make, state = mctx
+    monkeypatch.setattr(media, "fetch_image", fake_fetch_image)
+    wp = MediaWP(featured=55, gallery=[{"url": "https://s.test/u/g.png", "alt": "g"}])
+    c = make([make_row(**{"WP post ID": 9, "Rewrite": True, "Main image URL": "https://v.test/new.png"})], wp=wp)
+    runner.poll(c, now_utc=NOW)
+    assert wp.calls_fm == [777] and len(wp.uploads) == 1
 
 
 def test_runner_upload_failure_never_stops_the_row(mctx, monkeypatch):
     make, state = mctx
-    monkeypatch.setattr(media, "pick_image", fake_pick_image)
-    state["images"] = [{"url": "https://v.test/hero.png", "alt": "", "source": "s", "sales": True}]
-    c = make([make_row()], wp=MediaWP(fail_upload=True))
+    monkeypatch.setattr(media, "fetch_image", fake_fetch_image)
+    c = make([make_row(**{"Main image URL": "https://v.test/mine.png"})], wp=MediaWP(fail_upload=True))
     runner.poll(c, now_utc=NOW)
     out = c.sheet.final(2)
-    assert out["Status"] == "Draft ready" and "Image step skipped" in out["Messages"] and c.wp.calls_fm == [None]
+    assert out["Status"] == "Draft ready" and "Main image skipped" in out["Messages"] and c.wp.calls_fm == [None]
+
+
+def test_fetch_image_checks_the_file_and_converts_drive_links():
+    s = FakeSession({"uc?export=download&id=1AbCdEfGhIjKlMnOpQrStUv": Resp(body=jpg(1600, 900)),
+                     "/page": Resp(body=b"<html>login</html>"), "/small.png": Resp(body=png(400, 300))})
+    pick, note = media.fetch_image("https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUv/view?usp=sharing", "BuyerEngine AI", s)
+    assert pick.mime == "image/jpeg" and pick.filename == "buyerengine-ai-review.jpg" and "1600×900" in note
+    assert media.fetch_image("https://v.test/page", "X", s)[0] is None
+    small, note = media.fetch_image("https://v.test/small.png", "X", s)
+    assert small and "quite small" in note
+    assert media.fetch_image("ftp://x/y.png", "X", s)[0] is None
 
 
 def test_runner_sheet_wistia_share_link_with_wvideo_is_converted(mctx):
@@ -282,3 +326,64 @@ def test_runner_sheet_wistia_share_link_with_wvideo_is_converted(mctx):
     runner.poll(c, now_utc=NOW)
     assert c.wp.last_review["media"]["videoUrl"] == "https://fast.wistia.net/embed/iframe/mmi98bf00z"
     assert "CHECK: Video" not in c.sheet.final(2)["Messages"]  # the sheet's video wins, no auto pick
+
+
+# ------------------------------------------------------------------ reconcile decisions stick
+
+def test_reconcile_removal_is_not_undone_by_merge(monkeypatch):
+    from app import extract
+    from app.fetch import Source
+    text = "x" * 600
+    pages = {"https://v.test/jv": Source("https://v.test/jv", "web", text),
+             "https://docs.google.com/document/d/AAAAAAAAAAAAAAAAAAAAAAAA/edit": Source("gdoc-url", "gdoc", text)}
+    monkeypatch.setattr(extract, "fetch", lambda u: pages[u])
+    monkeypatch.setattr(extract, "pick_follow_links", lambda s: [])
+    gift = {"title": "Hot Buyer Reply Vault", "description": "webinar gift"}
+    base = {"productName": "P", "frontEnd": {"price": 37}, "otos": [], "affiliateBonuses": [],
+            "launch": {"cartOpen": {"local": "2026-10-06 11:00", "zone": "ET"}}}
+    other = dict(base, affiliateBonuses=[gift], vendor="V2")
+    seq = iter([base, other])
+    monkeypatch.setattr(extract, "extract_source", lambda c, s, role: (next(seq), 1, 1))
+    monkeypatch.setattr(extract, "compare", lambda a, b, label: ["affiliate bonuses differ"])
+
+    class C:
+        def complete_json(self, system, user, max_tokens=0):
+            class R:
+                data = {"facts": dict(base, affiliateBonuses=[]),
+                        "decisions": ["Affiliate bonuses: left empty, they are webinar gifts."]}
+                input_tokens = output_tokens = 1
+            return R()
+    res = extract.run(C(), ["https://v.test/jv", "https://docs.google.com/document/d/AAAAAAAAAAAAAAAAAAAAAAAA/edit"],
+                      today="2026-10-07")
+    assert res.facts.get("affiliateBonuses") in ([], None)
+    assert res.facts.get("vendor") == "V2"  # ordinary gaps are still filled from other sources
+
+
+def test_no_screenshots_means_no_gallery_key(mctx, monkeypatch):
+    make, state = mctx
+    monkeypatch.setattr(media, "pick_all", lambda *a, **k: (None, [], ["none"]))
+    state["images"] = [{"url": "https://v.test/x.png", "alt": "", "source": "s", "sales": True}]
+    c = make([make_row()])
+    runner.poll(c, now_utc=NOW)
+    assert "gallery" not in c.wp.last_review and c.sheet.final(2)["Status"] == "Draft ready"
+
+
+def test_pick_all_one_pass_main_then_gallery():
+    routes = {f"/shot{i}.png": Resp(body=png(1200 + i * 100, 900)) for i in range(1, 7)}
+    s = FakeSession(routes)
+    cands = [{"url": f"https://v.test/shot{i}.png", "alt": "", "sales": True} for i in range(1, 7)]
+    main, shots, notes = media.pick_all(cands, "BuyerEngine AI", s)
+    assert main.source.endswith("shot6.png")  # biggest wins
+    assert len(shots) == media.GALLERY_MAX and main.source not in [x.source for x in shots]
+    assert shots[0].filename == "buyerengine-ai-screenshot-1.png"
+    assert len(s.seen) == 6  # each image downloaded once
+
+
+def test_unknown_info_wording_is_flagged():
+    from app import write
+    from tests.test_write import SAMPLE
+    review = json.loads(json.dumps(SAMPLE))
+    review["faq"][0]["a"] = "The refund period isn't stated by the vendor."
+    inp = write.Inputs(facts=facts_from_sample(), fe_link=SAMPLE["links"]["frontEnd"],
+                       oto_links=[o["link"] for o in SAMPLE["pricing"]["otos"]])
+    assert any("points out missing information" in p for p in write._check(review, inp))
