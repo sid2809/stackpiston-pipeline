@@ -368,3 +368,15 @@ def test_wrapped_tool_is_unwrapped():
     r["tool"] = {"tool": r["tool"]}
     b = bonus.generate(FakeClient([r]), SAMPLE).bonus
     assert b["tool"]["engine"] == "scorer" and not bonus.validate(b)
+
+
+def test_patch_of_review_without_bonus_says_how_to_add_one(ctx, monkeypatch):
+    from app.runner import bonus_step
+    msgs = []
+    upd = bonus_step(make_row(), None, post={"sp_bonus_status": {"enabled": True, "saved": False, "ok": False, "url": ""}},
+                     post_id=5, review={}, old_bonus=None, old_ok=False, want_new=False, messages=msgs, used={})
+    assert upd == {} and "tick Rebuild bonus" in msgs[0]
+    msgs = []
+    bonus_step(make_row(), None, post={"sp_bonus_status": {"enabled": False, "saved": False, "ok": False, "url": ""}},
+               post_id=5, review={}, old_bonus=None, old_ok=False, want_new=False, messages=msgs, used={})
+    assert msgs == []  # switched off: nothing to nag about

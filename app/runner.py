@@ -119,7 +119,8 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
     ex = extract.run(ctx.client, jv_urls, row.text("Sales page URL") or None,
                      cart_open_override_utc=open_utc, cart_close_override_utc=close_utc,
                      owner_notes=row.text("Notes for AI") or None,
-                     hints={"oto_links": len(oto_links), "bundle_links": len(bundle_links)})
+                     # Only counts the owner actually entered: an empty OTO links cell means "no links", not "no OTOs".
+                     hints={k: n for k, n in (("oto_links", len(oto_links)), ("bundle_links", len(bundle_links))) if n} or None)
     checks = [f"CHECK: {w}" for w in ex.warnings]
     messages = checks + list(ex.notes)
     if not ex.ok:
@@ -285,6 +286,8 @@ def bonus_step(row, ctx: Context, *, post: dict, post_id: int, review: dict, old
                     messages.append("BONUS: the saved bonus broke the rules, so a new one was made (same link).")
             except Exception as e:
                 messages.append(f"BONUS not saved ({e.__class__.__name__}: {str(e)[:150]}).")
+    if not want_new and st and st.get("enabled") is not False and not st.get("saved"):
+        messages.append("No buyer bonus on this review yet: tick Rebuild bonus to make one (one AI call).")
     updates = {}
     if st and st.get("enabled") is not False and st.get("ok") and st.get("url"):
         if "bonus link" in getattr(row, "values", {}):

@@ -226,7 +226,7 @@ def test_labels_in_link_cells_are_ignored(ctx):
     c = ctx([make_row(**{"OTO links": labelled, "FE affiliate link": "FE: " + SAMPLE["links"]["frontEnd"]})])
     runner.poll(c, now_utc=NOW)
     assert c.sheet.final(2)["Status"] == "Draft ready", c.sheet.final(2)["Messages"]
-    assert seen_calls[0]["hints"] == {"oto_links": len(links), "bundle_links": 0}
+    assert seen_calls[0]["hints"] == {"oto_links": len(links)}  # no bundle links entered: no bundle hint
 
 
 def test_jv_page_and_jv_doc_both_used(ctx):
@@ -272,3 +272,17 @@ def test_fe_cell_without_link_is_reported(ctx):
     c = ctx([make_row(**{"FE affiliate link": "jvz1.com/c/1/2"})], replies=[])
     runner.poll(c, now_utc=NOW)
     assert "FE affiliate link: no link" in c.sheet.final(2)["Messages"]
+
+
+def test_blank_oto_links_send_no_oto_hint(ctx):
+    c = ctx([make_row(**{"OTO links": ""})])
+    runner.poll(c, now_utc=NOW)
+    assert seen_calls[0]["hints"] is None  # "0 OTO links" must not be read as "0 OTOs"
+    out = c.sheet.final(2)
+    assert out["Status"] == "Draft ready", out.get("Messages")
+
+
+def test_entered_oto_links_are_sent_as_hint(ctx):
+    c = ctx([make_row()])
+    runner.poll(c, now_utc=NOW)
+    assert seen_calls[0]["hints"] == {"oto_links": len(SAMPLE["pricing"]["otos"])}
