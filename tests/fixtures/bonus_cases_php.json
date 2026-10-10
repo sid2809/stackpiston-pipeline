@@ -1,0 +1,178 @@
+{
+    "sample ok": [],
+    "tool null ok": [],
+    "no tool key ok": [],
+    "not object": [
+        "v should be 1.",
+        "code should be 12 lowercase letters or digits.",
+        "plan is missing."
+    ],
+    "empty": [
+        "Bonus data is empty or not valid JSON."
+    ],
+    "v 2": [
+        "v should be 1."
+    ],
+    "v \"1\" string": [
+        "v should be 1."
+    ],
+    "code uppercase": [
+        "code should be 12 lowercase letters or digits."
+    ],
+    "code short": [
+        "code should be 12 lowercase letters or digits."
+    ],
+    "6 days": [
+        "plan.days has 6 items (min 7)."
+    ],
+    "8 days": [
+        "plan.days has 8 items (max 7)."
+    ],
+    "days as object": [
+        "plan.days should be a list."
+    ],
+    "plan title too long": [
+        "plan.title is 71 characters (max 70)."
+    ],
+    "plan title 70 ok": [],
+    "6 tasks": [
+        "plan day 1 tasks has 6 items (max 5)."
+    ],
+    "money in task": [
+        "plan day 1 task 1 mentions a money amount (not allowed in bonuses)."
+    ],
+    "money euro": [
+        "plan.intro mentions a money amount (not allowed in bonuses)."
+    ],
+    "money words": [
+        "plan.intro mentions a money amount (not allowed in bonuses)."
+    ],
+    "dollar sign alone ok": [],
+    "control char": [
+        "plan.title has hidden control characters."
+    ],
+    "unicode ok": [],
+    "bad engine": [
+        "tool.engine should be scorer, checker or checklist."
+    ],
+    "2 questions": [
+        "tool.questions has 2 items (min 3)."
+    ],
+    "points float": [
+        "question 1 option 1 points should be a whole number."
+    ],
+    "points 11": [
+        "question 1 option 1 points is 11 (allowed 0 to 10)."
+    ],
+    "points string": [
+        "question 1 option 1 points should be a whole number."
+    ],
+    "all zero points": [
+        "tool.questions: at least one answer must score above 0."
+    ],
+    "1 option": [
+        "question 1 options has 1 items (min 2)."
+    ],
+    "no band 0": [
+        "tool.bands: one band must start at 0."
+    ],
+    "dup band min": [
+        "tool.bands: each band needs a different min."
+    ],
+    "band 101": [
+        "band 1 min is 101 (allowed 0 to 100)."
+    ],
+    "5 bands": [
+        "tool.bands has 5 items (max 4)."
+    ],
+    "checker ok": [],
+    "checker no placeholder ok": [],
+    "checker 2 rules": [
+        "tool.rules has 2 items (min 3)."
+    ],
+    "checker regex chars": [
+        "rule 3 phrase has characters that aren't allowed."
+    ],
+    "checker html phrase": [
+        "rule 3 phrase has characters that aren't allowed."
+    ],
+    "checker dup phrase case": [
+        "rule 4 phrase repeats an earlier rule."
+    ],
+    "checker phrase spaces": [
+        "rule 3 phrase has extra spaces at the start or end."
+    ],
+    "checker 1-char phrase": [
+        "rule 3 phrase is 1 characters (min 2).",
+        "rule 3 phrase has extra spaces at the start or end."
+    ],
+    "checker no cleanMessage": [
+        "tool.cleanMessage is missing."
+    ],
+    "checklist ok": [],
+    "checklist 1 item": [
+        "group 1 items has 1 items (min 2)."
+    ],
+    "checklist 7 groups": [
+        "tool.groups has 7 items (max 6)."
+    ],
+    "checklist 41 items": [
+        "tool.groups have 50 items in total (max 40)."
+    ],
+    "checklist why too long": [
+        "group 1 item 1 why is 241 characters (max 240)."
+    ],
+    "tool is string": [
+        "tool should be an object or null."
+    ],
+    "text is number": [
+        "plan.title should be text."
+    ],
+    "html text allowed (escaped)": [],
+    "unicode digits money": [
+        "plan.intro mentions a money amount (not allowed in bonuses)."
+    ],
+    "arabic digit after $": [
+        "plan.intro mentions a money amount (not allowed in bonuses)."
+    ],
+    "USD prefix": [
+        "plan.intro mentions a money amount (not allowed in bonuses)."
+    ],
+    "rs inside word": [],
+    "5 bucks": [
+        "plan.intro mentions a money amount (not allowed in bonuses)."
+    ],
+    "100k views": [],
+    "accented word then usd": [
+        "plan.intro mentions a money amount (not allowed in bonuses)."
+    ],
+    "emoji ok": [],
+    "tab in title": [],
+    "vertical tab": [
+        "plan.intro is 12 characters (min 20).",
+        "plan.intro has hidden control characters."
+    ],
+    "phrase unicode letters": [],
+    "phrase curly apostrophe": [],
+    "phrase emoji": [
+        "rule 3 phrase has characters that aren't allowed."
+    ],
+    "phrase digits": [],
+    "phrase nbsp": [
+        "rule 3 phrase has characters that aren't allowed."
+    ],
+    "phrase trailing tab": [
+        "rule 3 phrase has characters that aren't allowed.",
+        "rule 3 phrase has extra spaces at the start or end."
+    ],
+    "points true": [
+        "question 1 option 1 points should be a whole number."
+    ],
+    "points 5.0": [
+        "question 1 option 1 points should be a whole number."
+    ],
+    "band min \"0\"": [
+        "band 3 min should be a whole number.",
+        "tool.bands: one band must start at 0."
+    ]
+}

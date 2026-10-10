@@ -16,7 +16,8 @@ TABS = {
     "Method notes": ["Note"],
     "Logs": ["Timestamp (IST)", "Row", "Slug", "Step", "Result", "Details"],
 }
-OPTIONAL = {"Launches": ["JV page URL", "JV doc URL", "Bundle links", "Notes for AI", "Main image URL"]}
+OPTIONAL = {"Launches": ["JV page URL", "JV doc URL", "Bundle links", "Notes for AI", "Main image URL",
+                         "Bonus link", "Rebuild bonus"]}
 JV_COLUMNS = ["JV page URL", "JV doc URL", "JV doc / JV page URL"]  # at least one must exist
 MAX_CELL = 49_000  # Google Sheets cell limit is 50,000 characters
 

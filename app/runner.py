@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from . import extract, media, notify, patch, write
+from . import bonus, extract, media, notify, patch, write
 from .llm import LLMError
 from .safety import scrub
 from .sheets import ist_now, sheet_datetime
@@ -47,6 +47,7 @@ class Result:
     status: str
     messages: list = field(default_factory=list)
     updates: dict = field(default_factory=dict)
+    usage: str = ""  # AI tokens used for this row, written to the Logs tab
 
 
 def _local_to_utc(value, tz: str, label: str) -> tuple[str | None, list[str]]:
@@ -98,9 +99,12 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
         return Result("Needs info", bad)
     if post_id and not rewrite:
         # Existing post without Rewrite: patch from the sheet only (no AI, $0), keeping manual edits.
-        return patch.patch_row(row, ctx, post_id=post_id, name=name, fe=fe, oto_links=oto_links,
-                               bundle_links=bundle_links, open_utc=open_utc, close_utc=close_utc,
-                               publish_utc=publish_utc, now_utc=now_utc)
+        result = patch.patch_row(row, ctx, post_id=post_id, name=name, fe=fe, oto_links=oto_links,
+                                 bundle_links=bundle_links, open_utc=open_utc, close_utc=close_utc,
+                                 publish_utc=publish_utc, now_utc=now_utc)
+        if row.checked("Rebuild bonus") and result.status in STATUS_FROM_WP.values():
+            rebuild_bonus_only(row, ctx, post_id, result)
+        return result
     current = {}
     if post_id:  # Rewrite: make sure the post exists and isn't trashed BEFORE spending anything on AI
         try:
@@ -119,7 +123,7 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
     checks = [f"CHECK: {w}" for w in ex.warnings]
     messages = checks + list(ex.notes)
     if not ex.ok:
-        return Result("Needs info", ex.blocking + messages)
+        return Result("Needs info", ex.blocking + messages, usage=_usage(ctx, ex))
 
     # Phase 6: demo video. The sheet's Video URL always wins; otherwise only a clearly labelled demo is used.
     video_url = row.text("Video URL")
@@ -167,7 +171,7 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
     messages += res.notes
     if not res.ok:
         status = "Needs info" if any("needs info" in p for p in res.problems) else "Error"
-        return Result(status, res.problems + messages)
+        return Result(status, res.problems + messages, usage=_usage(ctx, ex, res))
 
     review = res.review
     # Main image: only from the sheet's Main image URL (a Rewrite without a link keeps the current one).
@@ -207,15 +211,113 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
     updates = {"Method note used": method_note}
     if rewrite:
         updates["Rewrite"] = False
-    return save_and_finish(row, ctx, review=review, name=name, post_id=post_id, slug=slug, messages=messages,
-                           checks=checks, publish_utc=publish_utc, featured_id=featured_id, now_utc=now_utc,
-                           extra_updates=updates)
+
+    # Buyer bonus (one extra AI call, after the review is saved and published). A Rewrite keeps the saved bonus,
+    # and its link, unless Rebuild bonus is ticked.
+    rebuild = row.checked("Rebuild bonus")
+    if rebuild:
+        updates["Rebuild bonus"] = False
+    old_bonus, old_ok = bonus.existing(current) if post_id else (None, False)
+    used = {"in": 0, "out": 0}
+    job = {"review": review, "old": old_bonus, "old_ok": old_ok, "want_new": old_bonus is None or not old_ok or rebuild,
+           "used": used}
+    result = save_and_finish(row, ctx, review=review, name=name, post_id=post_id, slug=slug, messages=messages,
+                             checks=checks, publish_utc=publish_utc, featured_id=featured_id, now_utc=now_utc,
+                             extra_updates=updates, bonus_job=job)
+    result.usage = _usage(ctx, ex, res, used)
+    return result
+
+
+def _usage(ctx: Context, ex=None, res=None, used: dict | None = None) -> str:
+    """AI tokens for the Logs tab, so the real cost per review can be worked out."""
+    parts = []
+    if ex is not None:
+        parts.append(f"extract {ex.input_tokens}/{ex.output_tokens}")
+    if res is not None:
+        parts.append(f"write {res.input_tokens}/{res.output_tokens}")
+    if used is not None:
+        parts.append(f"bonus {used.get('in', 0)}/{used.get('out', 0)}")
+    model = getattr(ctx.client, "model", "")
+    return "tokens in/out: " + ", ".join(parts) + (f" ({model})" if model else "")
+
+
+def _bonus_support(post: dict) -> tuple[dict | None, str]:
+    """(bonus status from the theme, reason the bonus step can't run). An empty reason means it can run."""
+    if "sp_bonus_status" not in post:
+        return None, ("BONUS not made: the site's theme is older than 1.5.1. Upload the new theme, then tick "
+                      "Rebuild bonus. No AI was used for the bonus.")
+    st = post.get("sp_bonus_status")
+    if not isinstance(st, dict):
+        return None, ("BONUS not made: WordPress didn't report the bonus status (the pipeline user must be able to "
+                      "edit reviews). No AI was used for the bonus.")
+    if st.get("enabled") is False:
+        return st, "BONUS not made: bonus pages are switched off in Appearance → StackPiston. No AI was used for the bonus."
+    return st, ""
+
+
+def bonus_step(row, ctx: Context, *, post: dict, post_id: int, review: dict, old_bonus, old_ok: bool,
+               want_new: bool, messages: list, used: dict) -> dict:
+    """Make (if wanted) and save the buyer bonus, then return the sheet updates (the Bonus link).
+    Never raises: the bonus is optional and must never affect the review."""
+    st, problem = _bonus_support(post)
+    made = False
+    if want_new and problem:
+        messages.append(problem)
+    elif want_new:
+        try:
+            br = bonus.generate(ctx.client, review, code=old_bonus.get("code") if old_bonus else None)
+        except Exception as e:
+            br = bonus.BonusResult(notes=[f"BONUS skipped ({e.__class__.__name__}: {str(e)[:150]})."])
+        used["in"], used["out"] = br.input_tokens, br.output_tokens
+        messages.extend(br.notes)
+        if br.bonus:
+            try:
+                saved = ctx.wp.save_bonus(post_id, br.bonus)
+                st = saved.get("sp_bonus_status") if isinstance(saved.get("sp_bonus_status"), dict) else None
+                made = True
+                if st and not st.get("ok"):
+                    messages.append("BONUS saved but the site hid it: " + "; ".join(st.get("errors") or [])[:300])
+                    if old_bonus is not None and old_ok:  # put the working bonus back so the JVZoo link keeps working
+                        back = ctx.wp.save_bonus(post_id, old_bonus)
+                        st = back.get("sp_bonus_status") if isinstance(back.get("sp_bonus_status"), dict) else None
+                        messages.append("The previous bonus was put back, so its link still works.")
+                elif st and old_bonus is not None and not old_ok:
+                    messages.append("BONUS: the saved bonus broke the rules, so a new one was made (same link).")
+            except Exception as e:
+                messages.append(f"BONUS not saved ({e.__class__.__name__}: {str(e)[:150]}).")
+    updates = {}
+    if st and st.get("enabled") is not False and st.get("ok") and st.get("url"):
+        if "bonus link" in getattr(row, "values", {}):
+            updates["Bonus link"] = st["url"]
+        elif made:
+            messages.append("Add a column named 'Bonus link' to the sheet to see the bonus page link there. "
+                            "It's also in the review's edit screen in wp-admin.")
+    return updates
+
+
+def rebuild_bonus_only(row, ctx: Context, post_id: int, result: "Result") -> None:
+    """Rebuild bonus ticked without Rewrite: only the bonus AI call, from the review already on the post.
+    The review itself (and any manual edits) stays as it is."""
+    try:
+        current = ctx.wp.get_review(post_id)
+    except Exception as e:
+        result.messages.append(f"Rebuild bonus: the post couldn't be read ({e.__class__.__name__}). Try again later.")
+        return
+    review = WordPress.review_json(current) or {}
+    old, ok = bonus.existing(current)
+    used = {"in": 0, "out": 0}
+    result.updates.update(bonus_step(row, ctx, post=current, post_id=post_id, review=review, old_bonus=old,
+                                     old_ok=ok, want_new=True, messages=result.messages, used=used))
+    result.updates["Rebuild bonus"] = False
+    result.usage = _usage(ctx, used=used)
 
 
 def save_and_finish(row, ctx: Context, *, review: dict, name: str, post_id, slug: str, messages: list,
-                    checks: list, publish_utc, featured_id, now_utc: datetime, extra_updates: dict) -> Result:
+                    checks: list, publish_utc, featured_id, now_utc: datetime, extra_updates: dict,
+                    bonus_job: dict | None = None) -> Result:
     """Save as draft, record the post in the sheet, then publish/schedule if Mode = Publish allows it.
-    Shared by new reviews, rewrites and patches, so all follow the same publishing rules."""
+    Shared by new reviews, rewrites and patches, so all follow the same publishing rules.
+    bonus_job: what to do about the buyer bonus; it runs last, after the review is saved and published."""
     post = ctx.wp.save_review(review=review, title=f"{name} Review", post_id=post_id, want_status="draft",
                               featured_media=featured_id)
     post_id, saved_slug = post["id"], post.get("slug") or slug
@@ -247,6 +349,13 @@ def save_and_finish(row, ctx: Context, *, review: dict, name: str, post_id, slug
                                       featured_media=featured_id)
     elif warnings:
         messages.append("Theme warnings: " + " | ".join(warnings))
+
+    # Buyer bonus last, so a slow or failed AI call can never hold back saving or publishing the review.
+    job = bonus_job or {}
+    extra_updates = dict(extra_updates, **bonus_step(
+        row, ctx, post=post, post_id=post_id, review=job.get("review") or review, old_bonus=job.get("old"),
+        old_ok=job.get("old_ok", False), want_new=job.get("want_new", False), messages=messages,
+        used=job.get("used", {})))
 
     wp_status = post.get("status", "draft")
     status = STATUS_FROM_WP.get(wp_status, "Draft ready")
@@ -290,6 +399,8 @@ def poll(ctx: Context, only_row: int | None = None, now_utc: datetime | None = N
         msg_text = scrub(" | ".join(result.messages))
         ctx.sheet.update(r.number, dict(result.updates, Status=result.status, Messages=msg_text, **{"Last run": ist_now()}))
         ctx.sheet.log([ist_now(), r.number, result.updates.get("Slug", r.text("Slug")), "run", result.status, msg_text])
+        if result.usage:
+            ctx.sheet.log([ist_now(), r.number, result.updates.get("Slug", r.text("Slug")), "ai-usage", "", result.usage])
         err = notify.send(f"[StackPiston] {r.text('Product name') or 'Row ' + str(r.number)}: {result.status}",
                           f"Row {r.number}: {result.status}\n\n{msg_text}\n\n{result.updates.get('Preview link', '')}")
         if err:

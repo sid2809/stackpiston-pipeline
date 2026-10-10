@@ -1,0 +1,199 @@
+{
+ "tool": {
+  "engine": "scorer",
+  "title": "Is this clip worth a render?",
+  "summary": "A 6-question scorer that tells you whether an idea deserves one of your 50 monthly renders, so the cap stops being a problem.",
+  "intro": "The front end gives you 50 renders a month. Answer six quick questions about a clip idea before you render it. Ideas that score high get rendered; low scorers get fixed first or dropped, so your renders go to clips that have a real chance.",
+  "questions": [
+   {
+    "q": "Does the idea fit into one clear point under 60 seconds?",
+    "options": [
+     {
+      "label": "Yes, one clear point",
+      "points": 10
+     },
+     {
+      "label": "Two or three points mixed",
+      "points": 4
+     },
+     {
+      "label": "Not really",
+      "points": 0
+     }
+    ]
+   },
+   {
+    "q": "Can the first 3 seconds stop a scroller (question, bold claim, surprising visual)?",
+    "options": [
+     {
+      "label": "Yes",
+      "points": 10
+     },
+     {
+      "label": "Maybe, with editing",
+      "points": 5
+     },
+     {
+      "label": "No",
+      "points": 0
+     }
+    ]
+   },
+   {
+    "q": "Does your audience search for or ask about this topic?",
+    "options": [
+     {
+      "label": "Often",
+      "points": 10
+     },
+     {
+      "label": "Sometimes",
+      "points": 5
+     },
+     {
+      "label": "Not sure",
+      "points": 2
+     }
+    ]
+   },
+   {
+    "q": "Do you have the rights to the footage, music and text you'll use?",
+    "options": [
+     {
+      "label": "Yes, all of it",
+      "points": 10
+     },
+     {
+      "label": "Some of it",
+      "points": 3
+     },
+     {
+      "label": "No or not sure",
+      "points": 0
+     }
+    ]
+   },
+   {
+    "q": "Will you post it within the next 7 days?",
+    "options": [
+     {
+      "label": "Yes, it's scheduled",
+      "points": 10
+     },
+     {
+      "label": "Probably",
+      "points": 5
+     },
+     {
+      "label": "No plan yet",
+      "points": 0
+     }
+    ]
+   },
+   {
+    "q": "Have you already rendered a similar clip this month?",
+    "options": [
+     {
+      "label": "No, it's new",
+      "points": 10
+     },
+     {
+      "label": "Yes, but this angle is different",
+      "points": 6
+     },
+     {
+      "label": "Yes, very similar",
+      "points": 1
+     }
+    ]
+   }
+  ],
+  "bands": [
+   {
+    "min": 75,
+    "title": "Render it",
+    "advice": "This idea is focused, has a hook and you'll post it soon. Use a render on it, then save the settings as a template so the next one is faster."
+   },
+   {
+    "min": 45,
+    "title": "Fix it first",
+    "advice": "There's something here, but it isn't ready. Tighten it to one point, write a stronger opening line, and check the rights to anything you didn't make. Score it again before rendering."
+   },
+   {
+    "min": 0,
+    "title": "Save your render",
+    "advice": "Skip this one for now. Put it in an ideas list and come back when you have a clear point, a hook and a posting date."
+   }
+  ]
+ },
+ "plan": {
+  "title": "Your first 7 days with ClipForge AI",
+  "summary": "A day-by-day plan from setup to your first week of posted clips, with one small goal per day.",
+  "intro": "One short session a day. By day 7 you'll have a brand kit, a reusable template and a week of clips posted, plus a simple way to see what worked.",
+  "days": [
+   {
+    "title": "Set up your brand kit",
+    "tasks": [
+     "Log in and open the brand kit.",
+     "Add your logo, colours and fonts.",
+     "Pick the 1 or 2 platforms you'll post on first."
+    ],
+    "result": "Every video you make from now on looks like yours."
+   },
+   {
+    "title": "Turn one blog post into a video",
+    "tasks": [
+     "Pick an article that already does well.",
+     "Run it through blog-to-video.",
+     "Trim it to under 60 seconds and preview it."
+    ],
+    "result": "Your first draft video."
+   },
+   {
+    "title": "Fix captions and voice",
+    "tasks": [
+     "Read the auto captions word by word and fix mistakes.",
+     "Try two or three voices and keep the clearest one.",
+     "Keep background music low so the voice is easy to hear."
+    ],
+    "result": "A finished first clip you're happy to post."
+   },
+   {
+    "title": "Plan a week of clips",
+    "tasks": [
+     "Write down 7 clip ideas.",
+     "Run each one through the scorer above.",
+     "Keep the ideas that score 75 or more."
+    ],
+    "result": "A short list of ideas worth your renders."
+   },
+   {
+    "title": "Batch-render and save a template",
+    "tasks": [
+     "Render your top 3 ideas in one sitting.",
+     "Save your best settings as a template.",
+     "Note how many renders you've used this month."
+    ],
+    "result": "Three clips ready and a template for next time."
+   },
+   {
+    "title": "Post your clips",
+    "tasks": [
+     "Post one clip on each platform you picked.",
+     "Write a short caption that ends with a question.",
+     "Note the time you posted each one."
+    ],
+    "result": "Your first clips are live."
+   },
+   {
+    "title": "Check what worked",
+    "tasks": [
+     "After a day, check views and watch time for each clip.",
+     "Write down what the best clip did differently.",
+     "Plan next week's ideas around it."
+    ],
+    "result": "A simple weekly routine you can repeat."
+   }
+  ]
+ }
+}

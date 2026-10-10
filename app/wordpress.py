@@ -17,6 +17,7 @@ import requests
 from .config import WPConfig
 
 META_KEY = "sp_review_json"
+BONUS_META_KEY = "sp_bonus_json"
 LIVE_STATUSES = {"publish", "future"}
 UA = "StackPiston-Pipeline/1.0 (+https://stackpiston.com)"
 
@@ -119,6 +120,18 @@ class WordPress:
         if want_status == "future" and date_gmt:
             body["date_gmt"] = date_gmt
         return self._req("POST", "/reviews", json=body)
+
+    def save_bonus(self, post_id: int, bonus: dict) -> dict:
+        """Save the buyer bonus in its own field (theme 1.5.0+). Only this field is sent, so nothing else changes.
+        The returned post has sp_bonus_status: whether the theme accepted it, and the bonus page link."""
+        return self._req("POST", f"/reviews/{int(post_id)}",
+                         json={"meta": {BONUS_META_KEY: json.dumps(bonus, ensure_ascii=False, allow_nan=False)}})
+
+    @staticmethod
+    def bonus_status(post: dict) -> dict | None:
+        """None means the site's theme is older than 1.5.0 (no bonus support)."""
+        st = post.get("sp_bonus_status")
+        return st if isinstance(st, dict) else None
 
     def upload_media(self, data: bytes, filename: str, mime: str, alt: str = "", source: str = "") -> dict:
         """source: the link the image came from, kept in the image's description so a patch can tell
