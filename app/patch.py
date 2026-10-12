@@ -87,6 +87,16 @@ def patch_row(row, ctx, *, post_id: int, name: str, fe: str, oto_links: list[str
                 item["link"] = link
                 changed.append(f"{label} {i} link")
 
+    # How it was reviewed: follows the sheet's Days tested / Testing notes (no AI). Filling them in for a review
+    # you really tested, then Status = Run, restores "Bought & tested"; clearing them makes it a Researched review.
+    from .write import tested_from, testing_fields
+    tested = tested_from(row.text("Days tested"), row.text("Testing notes"))
+    rv = review.setdefault("review", {})
+    if (rv.get("tested") is True) != tested:  # no flag (older reviews) counts as not tested, like the theme
+        note = row.text("Method note used") if tested else ""
+        rv.update(testing_fields(tested, row.text("Days tested"), note))
+        changed.append("testing status (" + ("Bought & tested" if tested else "Researched review") + ")")
+
     # Launch dates (blank cells keep what the review has)
     launch = review.setdefault("launch", {})
     if open_utc and launch.get("cartOpen") != open_utc:

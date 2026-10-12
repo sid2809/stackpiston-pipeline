@@ -62,7 +62,8 @@ def inputs(**kw):
                 oto_links=[o["link"] for o in SAMPLE["pricing"]["otos"]],
                 own_bonuses=[{"type": "Access", "title": "15-Min 1-on-1 Founder Call",
                               "description": "A private 15-minute call with the StackPiston founder.", "value": 97}],
-                method_note="We got early access before launch.", authors={"marcus"})
+                method_note="We got early access before launch.", authors={"marcus"},
+                days_tested="7")  # the sample copy describes hands-on use, so by default it's a tested review
     base.update(kw)
     return Inputs(**base)
 
@@ -76,12 +77,36 @@ class FakeClient:
         return LLMResult(self.replies.pop(0), "", 1000, 500, "fake")
 
 
+def untested_copy():
+    """The sample copy without first-hand wording, as the writer must produce when nothing was tested."""
+    from app.write import HANDS_ON_RE, _strings
+    c = copy_from_sample()
+    c["verdict"] = c["verdict"].replace("The fastest way we found to", "A fast way to")
+    c["seoDescription"] = c["seoDescription"].replace("The fastest way we found to", "A fast way to")
+
+    def clean(node):
+        if isinstance(node, dict):
+            return {k: clean(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [clean(x) for x in node if not (isinstance(x, str) and HANDS_ON_RE.search(x))]
+        if isinstance(node, str) and HANDS_ON_RE.search(node):
+            kept = [x for x in node.split(". ") if not HANDS_ON_RE.search(x)]
+            return ". ".join(kept) or "See the vendor's demo for details."
+        return node
+    c = clean(c)
+    assert not [p for p, t in _strings(c) if HANDS_ON_RE.search(t)]
+    return c
+
+
 def test_good_copy_gives_clean_review_first_try():
-    res = run(FakeClient([copy_from_sample()]), inputs(), today="2026-10-06")
+    res = run(FakeClient([untested_copy()]), inputs(days_tested=""), today="2026-10-06")
     assert res.ok, res.problems
     r = res.review
     assert r["pricing"]["frontEnd"]["price"] == 17 and r["links"]["frontEnd"] == SAMPLE["links"]["frontEnd"]
-    assert r["review"]["label"] == "Recommended" and r["review"]["methodNote"].startswith("We got early")
+    assert r["review"]["label"] == "Recommended"
+    # Not tested (no Days tested / Testing notes): honest research note, no hands-on badge or "tested N days".
+    assert r["review"]["tested"] is False and r["review"]["methodNote"].startswith("How we reviewed it")
+    assert r["review"]["trustBadge"] == "Researched review" and r["review"]["testedNote"] == ""
     assert r["launch"]["timezoneLabel"] == "EDT" and r["bonuses"][0]["value"] == 97
     assert res.attempts == 1
 
@@ -184,7 +209,7 @@ def test_testing_statements_are_flagged_but_badge_is_fine():
     fixed = copy.deepcopy(c)
     fixed["cons"] = c["cons"][:2] + ["Template library is thin"]
     client = FakeClient([c, fixed])
-    res = run(client, inputs(), today="2026-10-06")
+    res = run(client, inputs(days_tested="5"), today="2026-10-06")
     assert res.ok and client.calls == 2 and res.review["review"]["trustBadge"] == "Bought & tested"
 
 
@@ -312,3 +337,48 @@ def test_oto_without_contents_must_be_skip():
     client = FakeClient([bad, good])
     res = run(client, inputs(facts=f), today="2026-10-06")
     assert res.ok and client.calls == 2 and res.review["pricing"]["otos"][2]["verdict"] == "skip"
+
+
+def test_tested_review_keeps_method_note_and_days():
+    r = run(FakeClient([copy_from_sample()]), inputs(days_tested="5"), today="2026-10-06").review["review"]
+    assert r["tested"] is True and r["methodNote"].startswith("We got early") and r["testedNote"] == "tested 5 days"
+    r = run(FakeClient([copy_from_sample()]), inputs(days_tested="", testing_notes="Rendered 12 videos."), today="2026-10-06").review["review"]
+    assert r["tested"] is True and r["testedNote"] == ""  # tested, but no day count given: no invented "7 days"
+
+
+def test_untested_review_cannot_claim_hands_on_use():
+    bad = copy_from_sample()
+    bad["pros"] = ["We had our first result within 20 minutes"] + bad["pros"][1:]
+    client = FakeClient([bad, untested_copy()])
+    res = run(client, inputs(days_tested=""), today="2026-10-06")
+    assert res.ok and client.calls == 2  # flagged, then fixed
+    tested = run(FakeClient([bad]), inputs(days_tested="5"), today="2026-10-06")
+    assert tested.ok  # with real testing notes/days, first-hand wording is allowed
+
+
+def test_hands_on_check_catches_claims_but_not_normal_copy():
+    from app.write import hands_on
+    for t in ["The fastest way we tested", "fast and stable in our tests", "about 2× faster in our tests", "We hit the cap on day four",
+              "We had our first result within 20 minutes", "we ran it for a week", "We bought the front end on launch day"]:
+        assert hands_on(t), t
+    # normal review copy and FAQ wording must NOT trigger a (paid) fixer call
+    for t in ["30-day refund via JVZoo", "Turns blog posts into videos", "The vendor says renders are 3x faster", "Your first 7 days",
+              "Day 1: set up your account", "from day one", "If we had to pick one, it's OTO 1", "We found the refund terms clear",
+              "Once you have used it, the templates make sense", "Anyone who has tried it", "What if I bought through another link?",
+              "Do I get bonuses if I used a coupon?", "Hands-on video training", "10x Faster Rendering", "$5 off on launch day",
+              "post 3 videos a day 7 days a week", "In the demo, we used to see renders finish in 90 seconds."]:
+        assert not hands_on(t), t
+
+
+def test_fact_fields_are_never_checked():
+    from app.write import FACT_PATH_RE
+    for p in ["product.name", "slug", "links.frontEnd", "launch.cartOpen", "pricing.otos[0].name", "pricing.otos[2].downsell.name",
+              "pricing.frontEnd.coupon.code", "pricing.bundles[0].name"]:
+        assert FACT_PATH_RE.search(p), p
+    for p in ["verdict", "pros[0]", "pricing.otos[0].summary", "faq[1].a", "pricing.frontEnd.note"]:
+        assert not FACT_PATH_RE.search(p), p
+
+
+def test_zero_days_is_not_tested():
+    from app.write import tested_from
+    assert not tested_from("0", "") and not tested_from("0 days", "") and tested_from("5", "") and tested_from("", "used it")

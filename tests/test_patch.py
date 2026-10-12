@@ -384,3 +384,29 @@ def test_sheet_messages_are_scrubbed(monkeypatch):
     out = c.sheet.final(2)
     assert "abcd efgh" not in out["Messages"] and "***" in out["Messages"] and out["Status"] == "Error"
     assert all("abcd efgh" not in str(x) for x in c.sheet.logs)
+
+
+def test_patch_sets_tested_from_sheet_without_ai():
+    wp = StoreWP(sample_review())  # older review: no "tested" flag
+    c = ctx_for(wp, [row(**{"Days tested": "5"})])
+    runner.poll(c, now_utc=NOW)
+    r = wp.review()["review"]
+    assert r["tested"] is True and r["trustBadge"] == "Bought & tested" and r["testedNote"] == "tested 5 days"
+    assert "haven't used it" not in r["methodNote"] and "testing status" in c.sheet.final(2)["Messages"]
+
+
+def test_patch_untested_review_with_empty_sheet_changes_nothing():
+    wp = StoreWP(sample_review())
+    c = ctx_for(wp, [row(**{"Days tested": "", "Testing notes": ""})])
+    runner.poll(c, now_utc=NOW)
+    assert "Nothing to update" in c.sheet.final(2)["Messages"] and not wp.saves
+
+
+def test_patch_clearing_days_tested_makes_it_researched():
+    rv = sample_review()
+    rv["review"]["tested"] = True
+    wp = StoreWP(rv)
+    c = ctx_for(wp, [row(**{"Days tested": "", "Testing notes": ""})])
+    runner.poll(c, now_utc=NOW)
+    r = wp.review()["review"]
+    assert r["tested"] is False and r["trustBadge"] == "Researched review" and r["testedNote"] == ""

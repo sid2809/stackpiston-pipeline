@@ -60,7 +60,8 @@ def make_row(n=2, **over):
     s = SAMPLE
     vals = {"Status": "Run", "Product name": "ClipForge AI", "JV page URL": "https://v.test/jv/",
             "FE affiliate link": s["links"]["frontEnd"],
-            "OTO links": "\n".join(o["link"] for o in s["pricing"]["otos"]), "Mode": "Draft"}
+            "OTO links": "\n".join(o["link"] for o in s["pricing"]["otos"]), "Mode": "Draft",
+            "Days tested": "7"}  # the sample copy describes hands-on use
     vals.update(over)
     return Row(n, {norm(k): v for k, v in vals.items()})
 
@@ -90,7 +91,7 @@ def ctx(monkeypatch):
 
 
 def test_run_row_creates_draft_and_fills_sheet(ctx):
-    c = ctx([make_row()])
+    c = ctx([make_row(**{"Days tested": "5"})])
     counts = runner.poll(c, now_utc=NOW)
     out = c.sheet.final(2)
     assert counts == {"Draft ready": 1} and out["Status"] == "Draft ready"
@@ -101,9 +102,16 @@ def test_run_row_creates_draft_and_fills_sheet(ctx):
 
 
 def test_method_notes_rotate_across_rows(ctx):
-    c = ctx([make_row(2), make_row(3, **{"Product name": "Other"})])
+    c = ctx([make_row(2, **{"Days tested": "5"}), make_row(3, **{"Product name": "Other", "Testing notes": "Used it."})])
     runner.poll(c, now_utc=NOW)
     assert c.sheet.final(2)["Method note used"] == "Note A" and c.sheet.final(3)["Method note used"] == "Note B"
+
+
+def test_untested_row_uses_no_hands_on_method_note(ctx):
+    from tests.test_write import untested_copy
+    c = ctx([make_row(**{"Days tested": ""})], replies=[untested_copy()])
+    runner.poll(c, now_utc=NOW)
+    assert "Method note used" not in c.sheet.final(2) and c.sheet.final(2)["Status"] == "Draft ready"
 
 
 def test_publish_mode_publishes_when_no_warnings(ctx):

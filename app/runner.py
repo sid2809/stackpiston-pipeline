@@ -162,7 +162,9 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
 
     facts = dict(ex.facts, productName=name)  # the sheet's product name is the official one
     slug = row.text("Slug") or write.slugify(name)
-    method_note = row.text("Method note used") or ctx.take_method_note()
+    # The rotating "how we tested" notes describe hands-on use, so they're only used when the row says it was tested.
+    tested = write.tested_from(row.text("Days tested"), row.text("Testing notes"))
+    method_note = (row.text("Method note used") or ctx.take_method_note()) if tested else ""
     inp = write.Inputs(
         facts=facts, fe_link=fe, oto_links=oto_links, bundle_links=bundle_links,
         own_bonuses=ctx.bonuses, method_note=method_note, testing_notes=row.text("Testing notes"),
@@ -209,7 +211,7 @@ def process_row(row, ctx: Context, now_utc: datetime | None = None) -> Result:
             messages.append(f"Image step skipped ({e.__class__.__name__}: {str(e)[:150]}).")
     if gallery:
         review["gallery"] = gallery[:media.GALLERY_MAX]
-    updates = {"Method note used": method_note}
+    updates = {"Method note used": method_note} if method_note else {}
     if rewrite:
         updates["Rewrite"] = False
 

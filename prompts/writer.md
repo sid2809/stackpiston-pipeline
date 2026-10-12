@@ -12,6 +12,7 @@ Output rules
 - Never point out missing information: no "isn't stated", "not stated", "unstated", "not listed", "not specified", "not disclosed", "unknown", "unclear" about the offer (prices, price types, refund terms, post-launch price, client terms...). If FACTS doesn't have it, don't mention that topic at all, and don't write an FAQ question whose answer would be "we don't know".
 - Testing: describe specific test results (timings, counts, outcomes) only if TESTING NOTES contain them. Otherwise describe what the product does, based on FACTS, without claiming measured results.
 - Never say whether the product was or wasn't tested (no "not tested by us", no "in our tests"). The page shows testing status separately.
+- If TESTING NOTES is "(none)", never describe using the product yourself or its results in the past tense (no "renders were fast", "we had our first result", "we hit the cap on day four", "noticeably faster on launch day"). Describe what it does in the present tense, and attribute speed, quality or stability claims to the vendor ("the vendor says renders take about 90 seconds", "in the demo").
 
 Voice
 - Energetic but credible. Plain, direct sentences for a buyer deciding in the next five minutes.

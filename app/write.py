@@ -159,9 +159,10 @@ def assemble(copy_: dict, inp: Inputs, today: str | None = None) -> tuple[dict, 
         "launch": {"cartOpen": cart_open or "", "cartClose": cart_close or "",
                    "timeZone": "America/New_York", "timezoneLabel": tz_label},
         "review": {"label": _avg_label(breakdown), "verdict": c.get("verdict", ""),
-                   "finalVerdict": c.get("finalVerdict", ""), "methodNote": inp.method_note[:220],
-                   "trustBadge": "Bought & tested",
-                   "testedNote": f"tested {inp.days_tested} days" if str(inp.days_tested).strip() else "tested 7 days",
+                   "finalVerdict": c.get("finalVerdict", ""),
+                   # Hands-on claims only when the sheet says it was tested (Days tested or Testing notes);
+                   # otherwise an honest research note. The theme hides tested claims unless "tested" is true.
+                   **testing_fields(_tested(inp), inp.days_tested, inp.method_note),
                    "publishedAt": inp.published_at or today, "updatedAt": today,
                    "author": inp.author, "scoreBreakdown": breakdown},
         "links": {"frontEnd": inp.fe_link},
@@ -361,6 +362,12 @@ def _check(review: dict, inp: Inputs) -> list[str]:
     for path, text in _strings(review):
         if not path.startswith(("review.methodNote", "review.trustBadge", "review.testedNote")) and tested_re.search(text):
             probs.append(f"{path} talks about testing (\"{text[:60]}\"). Remove any statement about whether it was tested.")
+    if not _tested(inp):
+        skip = ("review.methodNote", "review.trustBadge", "review.testedNote", "bonuses", "vendorBonuses")
+        for path, text in _strings(review):
+            if not path.startswith(skip) and not FACT_PATH_RE.search(path) and hands_on(text):
+                probs.append(f"{path} describes using the product yourself (\"{text[:60]}\"), but there are no TESTING NOTES. "
+                             "Describe what it does in the present tense; attribute speed/quality claims to the vendor.")
     absent_re = re.compile(r"\b(vendor|seller)\b[^.]{0,40}\b(no|doesn't (offer|list|include|have)|lists no|offers no)\b[^.]{0,25}\bbonus"
                            r"|\bno (buyer |vendor |extra )?bonuses\b", re.I)
     for path, text in _strings(review):
@@ -399,6 +406,51 @@ def _user_message(inp: Inputs) -> str:
             f"({', '.join(b.get('title', '') for b in inp.own_bonuses)}), delivered in the JVZoo purchase area.\n\n"
             f"NICHES: {json.dumps(NICHES)}\n\n"
             f"TESTING NOTES (optional, from a human tester):\n{inp.testing_notes or '(none)'}")
+
+
+# First-hand experience wording. Without testing notes the review must not claim any (the theme also strips it).
+# Kept narrow on purpose: every false match costs a fixer AI call (the theme's sp_hands_on_re() is identical).
+HANDS_ON_RE = re.compile(
+    r"\b(in|from|during) our (own )?tests?\b|\bour (own )?(testing|tests)\b|\bin our (own )?account\b"
+    r"|\b(we|we've|we have|our team)\s+(\w+\s+){0,2}?(tested|tried|used|ran|bought|hit|noticed|measured|rendered)\b"
+    r"|\bwe(\s+have|'ve)?\s+had our\b", re.I)
+VENDOR_SAYS_RE = re.compile(r"\b(the )?vendor (says|claims|states|shows)\b|\baccording to the vendor\b|\bin the (vendor's )?demo\b", re.I)
+# Fields built from the sources, not written by the AI: the fixer can't change them, so they're never checked.
+FACT_PATH_RE = re.compile(r"^(product|slug|links|launch|schemaVersion)\b|coupon|downsell|^pricing\.\w+(\[\d+\])?\.(name|link|price)")
+
+
+def hands_on(text: str) -> bool:
+    """First-hand claim in a sentence, unless that sentence attributes it to the vendor."""
+    for sentence in re.split(r"(?<=[.!?;])\s+", text or ""):
+        if HANDS_ON_RE.search(sentence) and not VENDOR_SAYS_RE.search(sentence):
+            return True
+    return False
+
+RESEARCH_NOTE = ("How we reviewed it: we went through the sales page, demo, JV page, every upsell and the refund terms. "
+                 "We haven't used it ourselves yet; we'll update this review if we do.")
+
+
+TESTED_NOTE = "We bought it and used it ourselves before writing this review."
+
+
+def tested_from(days_tested, testing_notes) -> bool:
+    """Hands-on testing happened only if the sheet says so ("0" days doesn't count)."""
+    days = str(days_tested or "").strip()
+    days_ok = bool(days) and not re.fullmatch(r"0+(\.0+)?(\s*days?)?", days, re.I)
+    return days_ok or bool(str(testing_notes or "").strip())
+
+
+def _tested(inp: "Inputs") -> bool:
+    return tested_from(inp.days_tested, inp.testing_notes)
+
+
+def testing_fields(tested: bool, days_tested, method_note: str) -> dict:
+    """The review.* fields that state how the product was reviewed (used by write and patch)."""
+    days = str(days_tested or "").strip()
+    return {"tested": tested,
+            "methodNote": ((method_note or TESTED_NOTE) if tested else RESEARCH_NOTE)[:220],
+            "trustBadge": "Bought & tested" if tested else "Researched review",
+            "testedNote": f"tested {days} days" if tested and days and tested_from(days, "") else ""}
 
 
 def needs_info(inp: Inputs) -> list[str]:

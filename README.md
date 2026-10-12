@@ -18,6 +18,9 @@ Full plan: see the "StackPiston Pipeline: Build Plan & Phases" doc.
   **Rebuild bonus** (optional column) on its own to remake only the bonus (one AI call, same link, review untouched),
   or together with Rewrite. The bonus runs after saving/publishing, so it never blocks or delays a review.
   AI token use per row is written to the Logs tab (step `ai-usage`).
+- [x] Honest testing claims: a review is marked `review.tested` only when the sheet's **Days tested** or **Testing notes**
+  is filled. Otherwise it's a "Researched review" with an honest method note, and first-hand wording is rejected
+  (`HANDS_ON_RE` in `app/write.py`); the theme also strips it from older untested reviews.
 
 Email notifications are deferred: while SMTP settings are empty, results appear only in the sheet.
 
